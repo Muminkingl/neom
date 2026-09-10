@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { usePatients, Patient } from '../../context/PatientContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '../../context/AuthContext';
+import DentitionChart, { parseEffectiveAge } from '../../components/DentitionChart';
 
 function PatientFormContent() {
   const { addPatient, addVisit, editAppointment, patients, isLoading, error } = usePatients();
@@ -79,89 +80,16 @@ function PatientFormContent() {
     setSearchResults(results.slice(0, 10)); // max 10 results
   }, [searchQuery, patients]);
 
-  // State for table cells with dynamic sizing (default 8x8)
-  const [tableCells, setTableCells] = useState(
-    Array(8).fill(null).map(() => Array(8).fill(''))
-  );
-
-  // Functions to add or remove rows/columns from the table
-  const addTableRow = () => {
-    const newRow = Array(tableCells[0].length).fill('');
-    const newTableCells = [...tableCells, newRow];
-    setTableCells(newTableCells);
-
-    // Update tableData in formData
-    const tableDataString = JSON.stringify(newTableCells);
-    setFormData(prev => ({
-      ...prev,
-      tableData: tableDataString
-    }));
-  };
-
-  const addTableColumn = () => {
-    const newTableCells = tableCells.map(row => [...row, '']);
-    setTableCells(newTableCells);
-
-    // Update tableData in formData
-    const tableDataString = JSON.stringify(newTableCells);
-    setFormData(prev => ({
-      ...prev,
-      tableData: tableDataString
-    }));
-  };
-
-  const removeTableRow = () => {
-    if (tableCells.length <= 1) return; // Don't remove the last row
-
-    const newTableCells = tableCells.slice(0, -1); // Remove the last row
-    setTableCells(newTableCells);
-
-    // Update tableData in formData
-    const tableDataString = JSON.stringify(newTableCells);
-    setFormData(prev => ({
-      ...prev,
-      tableData: tableDataString
-    }));
-  };
-
-  const removeTableColumn = () => {
-    if (tableCells[0].length <= 1) return; // Don't remove the last column
-
-    const newTableCells = tableCells.map(row => row.slice(0, -1)); // Remove the last column
-    setTableCells(newTableCells);
-
-    // Update tableData in formData
-    const tableDataString = JSON.stringify(newTableCells);
-    setFormData(prev => ({
-      ...prev,
-      tableData: tableDataString
-    }));
-  };
-
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-
-    // Handle table cell changes
-    if (name.startsWith('tableCell-')) {
-      const [_, rowIndex, colIndex] = name.split('-');
-      const newTableCells = [...tableCells];
-      newTableCells[Number(rowIndex)][Number(colIndex)] = value;
-      setTableCells(newTableCells);
-
-      // Convert table data to JSON string for storage
-      const tableDataString = JSON.stringify(newTableCells);
-      setFormData(prev => ({
-        ...prev,
-        tableData: tableDataString
-      }));
-    } else {
-      // Handle regular form fields
-      setFormData(prev => ({
-        ...prev,
-        [name]: value
-      }));
-    }
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
   };
+
+  // Reactive age detection for dental dentition chart preview
+  const detectedAge = parseEffectiveAge(formData.dob);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -214,8 +142,6 @@ function PatientFormContent() {
           tableData: '',
           followUpDate: '',
         });
-        // Reset table cells
-        setTableCells(Array(8).fill(null).map(() => Array(8).fill('')));
         setFormSubmitted(false);
         setSelectedPatient(null);
         setMode('new');
@@ -246,10 +172,10 @@ function PatientFormContent() {
         {/* Header Section */}
         <div className="text-center mb-8">
           <h1 className="text-3xl sm:text-4xl font-bold text-gray-900 dark:text-white mb-2">
-            Patient Registration
+            Dental Patient Registration
           </h1>
           <p className="text-lg text-gray-600 dark:text-gray-300">
-            {isReception ? 'Fill in the basic patient details' : 'Enter patient information below'}
+            {isReception ? 'Fill in basic dental patient details' : 'Enter patient clinical information and 3D dentition chart'}
           </p>
         </div>
 
@@ -670,10 +596,24 @@ function PatientFormContent() {
                         name="dob"
                         value={formData.dob}
                         onChange={handleChange}
-                        placeholder="e.g. 30"
+                        placeholder="e.g. 8, 25, or 2018-05-20"
                         disabled={isLoading || formSubmitted}
                         className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
                       />
+                      {detectedAge !== null && (
+                        <div className={`mt-2 flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border ${
+                          detectedAge <= 12
+                            ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200 dark:border-amber-800'
+                            : 'bg-indigo-50 text-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
+                        }`}>
+                          <span>{detectedAge <= 12 ? '🍼' : '🦷'}</span>
+                          <span>
+                            {detectedAge <= 12
+                              ? `Pediatric profile (Age: ${detectedAge}) — Mixed dentition: Deciduous & Permanent charts`
+                              : `Adult profile (Age: ${detectedAge}) — Permanent dentition chart`}
+                          </span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Mobile Number */}
@@ -735,8 +675,8 @@ function PatientFormContent() {
                       )}
                     </div>
 
-                    {/* Age/Year of Diagnosis (Also in Step 1, but keeping as requested by the task if they meant to mirror it. Actually, it's better to render it once, but if task says both steps, we can render it here too. Let's render it to fulfill the list literally) */}
-                    <div>
+                    {/* Age of Diagnosis */}
+                    <div className="md:col-span-2">
                       <label htmlFor="ageOfDiagnosis2" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
                         Age/Year of Diagnosis
                       </label>
@@ -751,63 +691,6 @@ function PatientFormContent() {
                         placeholder="Age or year"
                       />
                     </div>
-
-                    {/* Diagnosis */}
-                    {!isStaff && (
-                      <div className="md:col-span-2">
-                        <label htmlFor="diagnosis" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                          Diagnosis
-                        </label>
-                        <input
-                          type="text"
-                          id="diagnosis"
-                          name="diagnosis"
-                          value={formData.diagnosis}
-                          onChange={handleChange}
-                          disabled={isLoading || formSubmitted || isStaff}
-                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                          placeholder="Patient diagnosis"
-                        />
-                      </div>
-                    )}
-
-                    {/* Treatment */}
-                    {!isStaff && (
-                      <div className="md:col-span-2">
-                        <label htmlFor="treatment" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                          Treatment
-                        </label>
-                        <input
-                          type="text"
-                          id="treatment"
-                          name="treatment"
-                          value={formData.treatment}
-                          onChange={handleChange}
-                          disabled={isLoading || formSubmitted || isStaff}
-                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                          placeholder="Treatment information"
-                        />
-                      </div>
-                    )}
-
-                    {/* Current Treatment */}
-                    {!isStaff && (
-                      <div className="md:col-span-2">
-                        <label htmlFor="currentTreatment" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                          Current Treatment
-                        </label>
-                        <textarea
-                          id="currentTreatment"
-                          name="currentTreatment"
-                          value={formData.currentTreatment}
-                          onChange={handleChange}
-                          rows={2}
-                          disabled={isLoading || formSubmitted || isStaff}
-                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                          placeholder="Current treatment details..."
-                        />
-                      </div>
-                    )}
 
                     {/* History */}
                     {!isStaff && (
@@ -926,113 +809,98 @@ function PatientFormContent() {
                 </div>
               )}
 
-              {/* STEP 3: Additional Notes */}
+              {/* STEP 3: Dentition Chart & Treatment */}
               {currentStep === 3 && (
                 <div className="animate-fadeIn">
                   <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-6 pb-3 border-b border-gray-100 dark:border-gray-700">
-                    Step 3: Additional Notes
+                    Step 3: Dentition Chart & Treatment
                   </h3>
                   
                   {!isStaff && (
                     <div className="space-y-8">
+                      {/* 3D Dentition Chart for Dentist Clinic */}
                       <div>
-                        <label htmlFor="note" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                          Notes
-                        </label>
-                        <textarea
-                          id="note"
-                          name="note"
-                          value={formData.note}
-                          onChange={handleChange}
-                          rows={8}
+                        <DentitionChart
+                          value={formData.tableData}
+                          onChange={(newChartValue) => {
+                            setFormData(prev => ({
+                              ...prev,
+                              tableData: newChartValue
+                            }));
+                          }}
+                          patientAge={formData.dob}
                           disabled={isLoading || formSubmitted || isStaff}
-                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                          placeholder="Enter any additional notes or observations about the patient..."
                         />
                       </div>
 
-                      {/* Optional Data Table hidden by default unless they used it before. Kept for backwards compatibility */}
-                      <div className="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50/50 dark:bg-gray-800/50">
-                        <div className="flex items-center justify-between mb-4 pb-2 border-b border-gray-200 dark:border-gray-700">
-                          <h4 className="text-base font-semibold text-gray-900 dark:text-white">
-                            Data Table <span className="text-xs font-normal text-gray-500">(Optional)</span>
-                          </h4>
-                          <div className="flex space-x-2">
-                            <div className="flex space-x-1">
-                              <button
-                                type="button"
-                                onClick={addTableColumn}
-                                disabled={isLoading || formSubmitted || isStaff}
-                                className="flex items-center px-2 py-1 text-xs bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200 dark:border-indigo-800"
-                              >
-                                + Col
-                              </button>
-                              <button
-                                type="button"
-                                onClick={removeTableColumn}
-                                disabled={isLoading || formSubmitted || tableCells[0].length <= 1 || isStaff}
-                                className="flex items-center px-2 py-1 text-xs bg-red-50 hover:bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded border border-red-200 dark:border-red-800 disabled:opacity-50"
-                              >
-                                - Col
-                              </button>
-                            </div>
-                            <div className="flex space-x-1">
-                              <button
-                                type="button"
-                                onClick={addTableRow}
-                                disabled={isLoading || formSubmitted || isStaff}
-                                className="flex items-center px-2 py-1 text-xs bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200 dark:border-indigo-800"
-                              >
-                                + Row
-                              </button>
-                              <button
-                                type="button"
-                                onClick={removeTableRow}
-                                disabled={isLoading || formSubmitted || tableCells.length <= 1 || isStaff}
-                                className="flex items-center px-2 py-1 text-xs bg-red-50 hover:bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded border border-red-200 dark:border-red-800 disabled:opacity-50"
-                              >
-                                - Row
-                              </button>
-                            </div>
-                          </div>
+                      {/* Fields directly after the chart: Diagnosis, Treatment, Current Treatment */}
+                      <div className="space-y-6 pt-4 border-t border-gray-100 dark:border-gray-700">
+                        {/* Diagnosis */}
+                        <div>
+                          <label htmlFor="diagnosis" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                            Diagnosis
+                          </label>
+                          <input
+                            type="text"
+                            id="diagnosis"
+                            name="diagnosis"
+                            value={formData.diagnosis}
+                            onChange={handleChange}
+                            disabled={isLoading || formSubmitted || isStaff}
+                            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
+                            placeholder="Patient diagnosis"
+                          />
                         </div>
-                        
-                        <div className="overflow-x-auto border border-gray-300 dark:border-gray-700 rounded shadow-sm">
-                          <table className="w-full border-collapse">
-                            <thead>
-                              <tr>
-                                {tableCells[0].map((_, colIndex) => (
-                                  <th
-                                    key={colIndex}
-                                    className="border border-gray-300 dark:border-gray-600 px-2 py-1.5 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium"
-                                  >
-                                    C{colIndex + 1}
-                                  </th>
-                                ))}
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {tableCells.map((row, rowIndex) => (
-                                <tr key={rowIndex}>
-                                  {row.map((cell, colIndex) => (
-                                    <td
-                                      key={`${rowIndex}-${colIndex}`}
-                                      className="border border-gray-300 dark:border-gray-600 p-0 bg-white dark:bg-gray-800"
-                                    >
-                                      <input
-                                        type="text"
-                                        name={`tableCell-${rowIndex}-${colIndex}`}
-                                        value={cell}
-                                        onChange={handleChange}
-                                        disabled={isLoading || formSubmitted || isStaff}
-                                        className="w-full px-2 py-1.5 bg-transparent text-gray-900 dark:text-white focus:outline-none focus:bg-indigo-50 dark:focus:bg-indigo-900/20 text-sm"
-                                      />
-                                    </td>
-                                  ))}
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+
+                        {/* Treatment */}
+                        <div>
+                          <label htmlFor="treatment" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                            Treatment
+                          </label>
+                          <input
+                            type="text"
+                            id="treatment"
+                            name="treatment"
+                            value={formData.treatment}
+                            onChange={handleChange}
+                            disabled={isLoading || formSubmitted || isStaff}
+                            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
+                            placeholder="Treatment information"
+                          />
+                        </div>
+
+                        {/* Current Treatment */}
+                        <div>
+                          <label htmlFor="currentTreatment" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                            Current Treatment
+                          </label>
+                          <textarea
+                            id="currentTreatment"
+                            name="currentTreatment"
+                            value={formData.currentTreatment}
+                            onChange={handleChange}
+                            rows={3}
+                            disabled={isLoading || formSubmitted || isStaff}
+                            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
+                            placeholder="Current treatment details..."
+                          />
+                        </div>
+
+                        {/* Notes */}
+                        <div>
+                          <label htmlFor="note" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                            Notes
+                          </label>
+                          <textarea
+                            id="note"
+                            name="note"
+                            value={formData.note}
+                            onChange={handleChange}
+                            rows={4}
+                            disabled={isLoading || formSubmitted || isStaff}
+                            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
+                            placeholder="Enter any additional notes or observations about the patient..."
+                          />
                         </div>
                       </div>
                     </div>

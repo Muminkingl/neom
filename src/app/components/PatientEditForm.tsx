@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { Patient } from '../context/PatientContext';
+import DentitionChart from './DentitionChart';
 
 interface PatientEditFormProps {
   patient: Patient;
@@ -33,65 +34,6 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
     // clinicId is read-only, not included in editable form
   });
 
-  // State for table cells with dynamic sizing (default 8x8)
-  const [tableCells, setTableCells] = useState(
-    Array(8).fill(null).map(() => Array(8).fill(''))
-  );
-
-  // Functions to add or remove rows/columns from the table
-  const addTableRow = () => {
-    const newRow = Array(tableCells[0].length).fill('');
-    const newTableCells = [...tableCells, newRow];
-    setTableCells(newTableCells);
-
-    // Update tableData in formData
-    const tableDataString = JSON.stringify(newTableCells);
-    setFormData(prev => ({
-      ...prev,
-      tableData: tableDataString
-    }));
-  };
-
-  const addTableColumn = () => {
-    const newTableCells = tableCells.map(row => [...row, '']);
-    setTableCells(newTableCells);
-
-    // Update tableData in formData
-    const tableDataString = JSON.stringify(newTableCells);
-    setFormData(prev => ({
-      ...prev,
-      tableData: tableDataString
-    }));
-  };
-
-  const removeTableRow = () => {
-    if (tableCells.length <= 1) return; // Don't remove the last row
-
-    const newTableCells = tableCells.slice(0, -1); // Remove the last row
-    setTableCells(newTableCells);
-
-    // Update tableData in formData
-    const tableDataString = JSON.stringify(newTableCells);
-    setFormData(prev => ({
-      ...prev,
-      tableData: tableDataString
-    }));
-  };
-
-  const removeTableColumn = () => {
-    if (tableCells[0].length <= 1) return; // Don't remove the last column
-
-    const newTableCells = tableCells.map(row => row.slice(0, -1)); // Remove the last column
-    setTableCells(newTableCells);
-
-    // Update tableData in formData
-    const tableDataString = JSON.stringify(newTableCells);
-    setFormData(prev => ({
-      ...prev,
-      tableData: tableDataString
-    }));
-  };
-
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
@@ -118,50 +60,14 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
 
       // clinicId is read-only, not included in editable form
     });
-
-    // Parse table data from JSON if it exists
-    if (patient.tableData) {
-      try {
-        const parsedTable = JSON.parse(patient.tableData);
-        if (Array.isArray(parsedTable) && parsedTable.length > 0 && Array.isArray(parsedTable[0])) {
-          // Handle tables of any size
-          setTableCells(parsedTable);
-        } else {
-          // Default to 8x8 if invalid format
-          setTableCells(Array(8).fill(null).map(() => Array(8).fill('')));
-        }
-      } catch (err) {
-        console.error("Error parsing table data:", err);
-        setTableCells(Array(8).fill(null).map(() => Array(8).fill('')));
-      }
-    } else {
-      setTableCells(Array(8).fill(null).map(() => Array(8).fill('')));
-    }
   }, [patient]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-
-    // Handle table cell changes
-    if (name.startsWith('tableCell-')) {
-      const [_, rowIndex, colIndex] = name.split('-');
-      const newTableCells = [...tableCells];
-      newTableCells[Number(rowIndex)][Number(colIndex)] = value;
-      setTableCells(newTableCells);
-
-      // Convert table data to JSON string for storage
-      const tableDataString = JSON.stringify(newTableCells);
-      setFormData(prev => ({
-        ...prev,
-        tableData: tableDataString
-      }));
-    } else {
-      // Handle regular form fields
-      setFormData(prev => ({
-        ...prev,
-        [name]: value
-      }));
-    }
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
   };
 
   const handlePrintGeneric = (content: string, title: string) => {
@@ -608,54 +514,6 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
           />
         </div>
 
-        {/* Diagnosis */}
-        <div>
-          <label htmlFor="diagnosis" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Diagnosis
-          </label>
-          <input
-            type="text"
-            id="diagnosis"
-            name="diagnosis"
-            value={formData.diagnosis}
-            onChange={handleChange}
-            disabled={isLoading}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-70 disabled:cursor-not-allowed"
-          />
-        </div>
-
-        {/* Treatment */}
-        <div>
-          <label htmlFor="treatment" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Treatment
-          </label>
-          <input
-            type="text"
-            id="treatment"
-            name="treatment"
-            value={formData.treatment}
-            onChange={handleChange}
-            disabled={isLoading}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-70 disabled:cursor-not-allowed"
-          />
-        </div>
-
-        {/* Current Treatment */}
-        <div>
-          <label htmlFor="currentTreatment" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Current Treatment
-          </label>
-          <textarea
-            id="currentTreatment"
-            name="currentTreatment"
-            value={formData.currentTreatment}
-            onChange={handleChange}
-            rows={3}
-            disabled={isLoading}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-70 disabled:cursor-not-allowed"
-          />
-        </div>
-
         {/* Clinic ID (Read-only) */}
         <div>
           <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -781,117 +639,76 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
         />
       </div>
 
-      {/* Data Table (with dynamic sizing) */}
+      {/* 3D Dentition Chart for Dentist Clinic */}
       <div>
-        <div className="flex items-center justify-between mb-1">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-            Additional Data Table
+        <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+          Dentition Chart (3D Dental Record)
+        </label>
+        <DentitionChart
+          value={formData.tableData}
+          onChange={(newChartValue) => {
+            setFormData(prev => ({
+              ...prev,
+              tableData: newChartValue
+            }));
+          }}
+          patientAge={formData.dob}
+          disabled={isLoading}
+        />
+      </div>
+
+      {/* Fields directly after Dentition Chart: Diagnosis, Treatment, Current Treatment */}
+      <div className="space-y-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+        {/* Diagnosis */}
+        <div>
+          <label htmlFor="diagnosis" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
+            Diagnosis
           </label>
-          <div className="flex space-x-2">
-            <div className="flex space-x-1">
-              <button
-                type="button"
-                onClick={addTableColumn}
-                disabled={isLoading}
-                className="px-2 py-1 text-xs bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 rounded-l border border-indigo-200 dark:border-indigo-800 focus:outline-none"
-                title="Add column"
-              >
-                <div className="flex items-center">
-                  <svg className="h-3 w-3 mr-1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zM3 10a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2zM3 16a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2z" />
-                  </svg>
-                  Add Col
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={removeTableColumn}
-                disabled={isLoading || tableCells[0].length <= 1}
-                className="px-2 py-1 text-xs bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-300 rounded-r border border-red-200 dark:border-red-800 focus:outline-none disabled:opacity-50"
-                title="Remove column"
-              >
-                <div className="flex items-center">
-                  <svg className="h-3 w-3 mr-1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 6a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1v-2zm0 6a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1v-1z" clipRule="evenodd" />
-                  </svg>
-                  Del Col
-                </div>
-              </button>
-            </div>
-
-            <div className="flex space-x-1">
-              <button
-                type="button"
-                onClick={addTableRow}
-                disabled={isLoading}
-                className="px-2 py-1 text-xs bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 rounded-l border border-indigo-200 dark:border-indigo-800 focus:outline-none"
-                title="Add row"
-              >
-                <div className="flex items-center">
-                  <svg className="h-3 w-3 mr-1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                    <path d="M5 3a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2V5a2 2 0 00-2-2H5zM5 11a2 2 0 00-2 2v2a2 2 0 002 2h2a2 2 0 002-2v-2a2 2 0 00-2-2H5zM11 5a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V5zM14 11a1 1 0 011 1v1h1a1 1 0 110 2h-1v1a1 1 0 11-2 0v-1h-1a1 1 0 110-2h1v-1a1 1 0 011-1z" />
-                  </svg>
-                  Add Row
-                </div>
-              </button>
-              <button
-                type="button"
-                onClick={removeTableRow}
-                disabled={isLoading || tableCells.length <= 1}
-                className="px-2 py-1 text-xs bg-red-50 hover:bg-red-100 dark:bg-red-900/30 dark:hover:bg-red-900/50 text-red-600 dark:text-red-300 rounded-r border border-red-200 dark:border-red-800 focus:outline-none disabled:opacity-50"
-                title="Remove row"
-              >
-                <div className="flex items-center">
-                  <svg className="h-3 w-3 mr-1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
-                    <path fillRule="evenodd" d="M3 5a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM3 15a1 1 0 011-1h6a1 1 0 110 2H4a1 1 0 01-1-1z" clipRule="evenodd" />
-                  </svg>
-                  Del Row
-                </div>
-              </button>
-            </div>
-          </div>
+          <input
+            type="text"
+            id="diagnosis"
+            name="diagnosis"
+            value={formData.diagnosis}
+            onChange={handleChange}
+            disabled={isLoading}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-70 disabled:cursor-not-allowed"
+            placeholder="Patient diagnosis"
+          />
         </div>
 
-        <div className="overflow-x-auto border border-gray-300 dark:border-gray-700 rounded-lg">
-          <table className="w-full border-collapse">
-            <thead>
-              <tr>
-                {tableCells[0].map((_, colIndex) => (
-                  <th
-                    key={colIndex}
-                    className="border border-gray-300 dark:border-gray-600 px-3 py-2 bg-gray-50 dark:bg-gray-700 text-gray-800 dark:text-gray-200 text-sm font-medium"
-                  >
-                    C{colIndex + 1}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {tableCells.map((row, rowIndex) => (
-                <tr key={rowIndex}>
-                  {row.map((cell, colIndex) => (
-                    <td
-                      key={`${rowIndex}-${colIndex}`}
-                      className="border border-gray-300 dark:border-gray-600 px-1 py-1 bg-white dark:bg-gray-800"
-                    >
-                      <input
-                        type="text"
-                        name={`tableCell-${rowIndex}-${colIndex}`}
-                        value={cell}
-                        onChange={handleChange}
-                        disabled={isLoading}
-                        className="w-full px-2 py-1 bg-transparent text-gray-900 dark:text-white focus:outline-none text-sm"
-                      />
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        {/* Treatment */}
+        <div>
+          <label htmlFor="treatment" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
+            Treatment
+          </label>
+          <input
+            type="text"
+            id="treatment"
+            name="treatment"
+            value={formData.treatment}
+            onChange={handleChange}
+            disabled={isLoading}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-70 disabled:cursor-not-allowed"
+            placeholder="Treatment information"
+          />
         </div>
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-          Optional: Add any additional data in this table. Use the buttons above to add rows or columns.
-        </p>
+
+        {/* Current Treatment */}
+        <div>
+          <label htmlFor="currentTreatment" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
+            Current Treatment
+          </label>
+          <textarea
+            id="currentTreatment"
+            name="currentTreatment"
+            value={formData.currentTreatment}
+            onChange={handleChange}
+            rows={3}
+            disabled={isLoading}
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-70 disabled:cursor-not-allowed"
+            placeholder="Current treatment details..."
+          />
+        </div>
       </div>
 
       {/* Buttons */}

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import PatientEditForm from '../../components/PatientEditForm';
 import InvestigationModal from '../../components/InvestigationModal';
+import DentitionChart from '../../components/DentitionChart';
 import { exportToExcel } from '@/lib/excelExport';
 import { generatePatientPDF } from '@/lib/pdfGenerator';
 import { supabase } from '@/lib/supabase';
@@ -1302,6 +1303,40 @@ export default function PatientsPage() {
                         </div>
                       </div>
                     </div>
+                  </div>
+
+                  {/* Dentition Chart Section */}
+                  <div className="mb-8">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                        <span className="text-lg">🦷</span> Dentition Chart
+                      </h3>
+                      {!isStaffAuth && (
+                        <button
+                          type="button"
+                          onClick={() => setIsEditing(true)}
+                          className="text-xs font-semibold px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg border border-indigo-200 dark:border-indigo-800 transition-colors flex items-center gap-1.5"
+                        >
+                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                          </svg>
+                          Edit Chart
+                        </button>
+                      )}
+                    </div>
+                    <DentitionChart
+                      value={selectedPatient.tableData}
+                      patientAge={selectedPatient.dob}
+                      readOnly={false}
+                      onChange={async (newChartVal) => {
+                        try {
+                          await editPatient(selectedPatient.id, { tableData: newChartVal });
+                          selectedPatient.tableData = newChartVal;
+                        } catch (err) {
+                          console.error('Failed to auto-save dentition chart', err);
+                        }
+                      }}
+                    />
                   </div>
 
 

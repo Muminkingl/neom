@@ -1,8 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Use environment variables if available, otherwise fall back to hardcoded values
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://hvcwikfcpyuplohlsoua.supabase.co';
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imh2Y3dpa2ZjcHl1cGxvaGxzb3VhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg4MzQwOTMsImV4cCI6MjA5NDQxMDA5M30.y4-PeYPwr5OvhWQZd-jGnh3_y3IinZiQtYNdltFshBE';
+// Use environment variables if available, otherwise fall back to project values
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.NEXT_SUPABASE_URL || 'https://bgwcqokzcrrdfmdtvptb.supabase.co';
+const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJnd2Nxb2t6Y3JyZGZtZHR2cHRiIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkwNDEzNzQsImV4cCI6MjEwNDYxNzM3NH0.ayVDHZu3oaJcIOBdPX14vt6Q_DrqXu__e7oU6QWCqzk';
 
 export const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: {
