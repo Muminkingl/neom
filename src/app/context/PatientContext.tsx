@@ -404,14 +404,10 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
               clinic_id: clinicId,
               note: apptData.notes ? `[Appointment Notes: ${apptData.notes}]` : '',
               table_data: '',
-              history: '',
-              past_medical_history: '',
-              drug_history: '',
-              past_surgical_history: '',
-              examination: '',
               follow_up_date: '',
               user_id: userId
             };
+
 
             const { data: createdPatient, error: insertError } = await supabase
               .from('patients')
@@ -600,11 +596,6 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
           clinic_id: clinicId,
           note: sanitizedData.note || '',
           table_data: sanitizedData.tableData || '',
-          history: sanitizedData.history || '',
-          past_medical_history: sanitizedData.pastMedicalHistory || '',
-          drug_history: sanitizedData.drugHistory || '',
-          past_surgical_history: sanitizedData.pastSurgicalHistory || '',
-          examination: sanitizedData.examination || '',
           follow_up_date: sanitizedData.followUpDate || '',
           user_id: userId
         })

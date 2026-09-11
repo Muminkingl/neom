@@ -600,20 +600,7 @@ function PatientFormContent() {
                         disabled={isLoading || formSubmitted}
                         className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
                       />
-                      {detectedAge !== null && (
-                        <div className={`mt-2 flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-lg border ${
-                          detectedAge <= 12
-                            ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300 border-amber-200 dark:border-amber-800'
-                            : 'bg-indigo-50 text-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-300 border-indigo-200 dark:border-indigo-800'
-                        }`}>
-                          <span>{detectedAge <= 12 ? '🍼' : '🦷'}</span>
-                          <span>
-                            {detectedAge <= 12
-                              ? `Pediatric profile (Age: ${detectedAge}) — Mixed dentition: Deciduous & Permanent charts`
-                              : `Adult profile (Age: ${detectedAge}) — Permanent dentition chart`}
-                          </span>
-                        </div>
-                      )}
+
                     </div>
 
                     {/* Mobile Number */}
