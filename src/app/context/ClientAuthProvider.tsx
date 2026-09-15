@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { AuthProvider } from './AuthContext';
 import { PatientProvider } from './PatientContext';
+import { StoreProvider } from './StoreContext';
 import ProtectedRoute from '../components/ProtectedRoute';
 
 export default function ClientAuthProvider({
@@ -26,7 +27,9 @@ export default function ClientAuthProvider({
   return (
     <AuthProvider>
       <PatientProvider>
-        <ProtectedRoute>{children}</ProtectedRoute>
+        <StoreProvider>
+          <ProtectedRoute>{children}</ProtectedRoute>
+        </StoreProvider>
       </PatientProvider>
     </AuthProvider>
   );

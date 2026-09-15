@@ -26,6 +26,7 @@ export interface Patient {
   examination?: string;
   followUpDate?: string;
   prescription?: string;
+  amountPaid?: number | string;
   createdAt: string;
   userId?: string;
 }
@@ -46,6 +47,7 @@ export interface Visit {
   note: string;
   table_data: string;
   prescription?: string;
+  amount_paid?: number;
   visited_at: string;
   user_id: string;
   investigations?: Array<{ id: string; imageUrl: string; fileName: string; uploadedAt: string }>;
@@ -103,6 +105,7 @@ interface PatientRecord {
   past_surgical_history?: string;
   examination?: string;
   follow_up_date?: string;
+  amount_paid?: number;
   created_at: string;
   user_id: string;
 }
@@ -213,6 +216,7 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
           pastSurgicalHistory: p.past_surgical_history || '',
           examination: p.examination || '',
           followUpDate: p.follow_up_date || '',
+          amountPaid: p.amount_paid ?? 0,
           createdAt: p.created_at,
           userId: p.user_id
         }));
@@ -597,6 +601,7 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
           note: sanitizedData.note || '',
           table_data: sanitizedData.tableData || '',
           follow_up_date: sanitizedData.followUpDate || '',
+          amount_paid: Number(sanitizedData.amountPaid) || 0,
           user_id: userId
         })
         .select();
@@ -630,6 +635,7 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
           pastSurgicalHistory: newPatientData.past_surgical_history || '',
           examination: newPatientData.examination || '',
           followUpDate: newPatientData.follow_up_date || '',
+          amountPaid: newPatientData.amount_paid ?? Number(sanitizedData.amountPaid) ?? 0,
           createdAt: newPatientData.created_at,
           userId: newPatientData.user_id
         };
@@ -655,6 +661,7 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
               follow_up_date: sanitizedData.followUpDate || '',
               note: sanitizedData.note || '',
               table_data: sanitizedData.tableData || '',
+              amount_paid: Number(sanitizedData.amountPaid) || 0,
               user_id: userId
             };
             const { error: visitError } = await supabase.from('visits').insert(visitData);
@@ -716,6 +723,7 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
       if (patientData.pastSurgicalHistory !== undefined) dbData.past_surgical_history = patientData.pastSurgicalHistory;
       if (patientData.examination !== undefined) dbData.examination = patientData.examination;
       if (patientData.followUpDate !== undefined) dbData.follow_up_date = patientData.followUpDate;
+      if (patientData.amountPaid !== undefined) dbData.amount_paid = Number(patientData.amountPaid) || 0;
 
       // Always use Supabase for data storage
       const { error } = await supabase
@@ -827,6 +835,7 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
         follow_up_date: visitData.followUpDate || '',
         note: visitData.note || '',
         table_data: visitData.tableData || '',
+        amount_paid: Number(visitData.amountPaid ?? (visitData as any).amount_paid) || 0,
         user_id: userId
       };
 
@@ -897,7 +906,7 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
   // Edit a specific visit record (does NOT touch other visits)
   const editVisit = async (visitId: string, visitData: Partial<Visit>) => {
     try {
-      const dbData: Record<string, string> = {};
+      const dbData: Record<string, any> = {};
       if (visitData.diagnosis !== undefined) dbData.diagnosis = visitData.diagnosis;
       if (visitData.treatment !== undefined) dbData.treatment = visitData.treatment;
       if (visitData.current_treatment !== undefined) dbData.current_treatment = visitData.current_treatment;
@@ -910,6 +919,7 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
       if (visitData.note !== undefined) dbData.note = visitData.note;
       if (visitData.prescription !== undefined) dbData.prescription = visitData.prescription;
       if (visitData.table_data !== undefined) dbData.table_data = visitData.table_data;
+      if (visitData.amount_paid !== undefined) dbData.amount_paid = Number(visitData.amount_paid) || 0;
 
       const { error } = await supabase
         .from('visits')

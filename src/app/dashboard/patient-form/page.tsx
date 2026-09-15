@@ -41,6 +41,7 @@ function PatientFormContent() {
     pastSurgicalHistory: '',
     examination: '',
     note: '',
+    amountPaid: '',
     tableData: '',
     followUpDate: '',
     // clinicId is not included here as it's auto-generated
@@ -82,6 +83,17 @@ function PatientFormContent() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    if (name === 'amountPaid') {
+      // Number only and USD only: allow digits and at most one decimal point
+      const sanitized = value.replace(/[^0-9.]/g, '');
+      const parts = sanitized.split('.');
+      const formatted = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : sanitized;
+      setFormData(prev => ({
+        ...prev,
+        amountPaid: formatted
+      }));
+      return;
+    }
     setFormData(prev => ({
       ...prev,
       [name]: value
@@ -106,10 +118,10 @@ function PatientFormContent() {
       setFormSubmitted(true);
       
       if (mode === 'existing' && selectedPatient) {
-        await addVisit(selectedPatient.id, { ...formData, clinicId: '' });
+        await addVisit(selectedPatient.id, { ...formData, clinicId: '', amountPaid: formData.amountPaid });
       } else {
         // Since clinicId is auto-generated on the server, we don't include it in the form data
-        await addPatient({ ...formData, clinicId: '' });
+        await addPatient({ ...formData, clinicId: '', amountPaid: formData.amountPaid });
       }
 
       // If registered from an appointment, update appointment status to Completed
@@ -139,6 +151,7 @@ function PatientFormContent() {
           pastSurgicalHistory: '',
           examination: '',
           note: '',
+          amountPaid: '',
           tableData: '',
           followUpDate: '',
         });
@@ -359,6 +372,37 @@ function PatientFormContent() {
                     className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70"
                     placeholder="Any additional notes about the patient..."
                   />
+                </div>
+
+                {/* Treatment Payment (USD) */}
+                <div>
+                  <label htmlFor="rec-amountPaid" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                    Payment / Treatment Fee (USD)
+                  </label>
+                  <div className="relative rounded-xl shadow-sm">
+                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
+                      <span className="text-gray-500 dark:text-gray-400 font-bold text-lg">$</span>
+                    </div>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      id="rec-amountPaid"
+                      name="amountPaid"
+                      value={formData.amountPaid}
+                      onChange={handleChange}
+                      disabled={isLoading || formSubmitted}
+                      className="w-full pl-9 pr-16 py-3 border border-gray-300 dark:border-gray-600 rounded-xl focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white font-mono font-semibold text-base"
+                      placeholder="0.00"
+                    />
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
+                      <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 rounded">
+                        USD
+                      </span>
+                    </div>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    How much money the patient has paid for this visit in USD (numbers only).
+                  </p>
                 </div>
                 {/* Submit */}
                 <button
@@ -888,6 +932,45 @@ function PatientFormContent() {
                             className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
                             placeholder="Enter any additional notes or observations about the patient..."
                           />
+                        </div>
+
+                        {/* Amount Paid / Treatment Fee (USD Only) */}
+                        <div className="p-5 bg-gradient-to-br from-emerald-50 to-teal-50/50 dark:from-emerald-950/20 dark:to-teal-950/10 border border-emerald-200 dark:border-emerald-800/60 rounded-xl">
+                          <div className="flex items-center justify-between mb-2">
+                            <label htmlFor="amountPaid" className="block text-sm font-bold text-emerald-900 dark:text-emerald-300">
+                              💰 Treatment Payment (USD Only)
+                            </label>
+                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200">
+                              USD ($)
+                            </span>
+                          </div>
+                          <div className="relative rounded-lg shadow-sm">
+                            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
+                              <span className="text-emerald-700 dark:text-emerald-400 font-bold text-xl">$</span>
+                            </div>
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              id="amountPaid"
+                              name="amountPaid"
+                              value={formData.amountPaid}
+                              onChange={handleChange}
+                              disabled={isLoading || formSubmitted || isStaff}
+                              className="w-full pl-9 pr-20 py-3.5 border border-emerald-300 dark:border-emerald-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-bold text-lg placeholder-gray-400"
+                              placeholder="0.00"
+                            />
+                            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-4">
+                              <span className="text-xs font-extrabold tracking-wider text-emerald-700 dark:text-emerald-400">
+                                USD
+                              </span>
+                            </div>
+                          </div>
+                          <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-400/90 flex items-center gap-1.5">
+                            <svg className="w-3.5 h-3.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+                              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
+                            </svg>
+                            Record how much money the patient has paid for this visit / treatment (numbers only, USD currency).
+                          </p>
                         </div>
                       </div>
                     </div>

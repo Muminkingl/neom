@@ -1370,6 +1370,11 @@ export default function PatientsPage() {
                                 <span className="text-xs font-bold px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200 dark:border-indigo-800 shrink-0">
                                   v{patientVisits.length - index}
                                 </span>
+                                {(visit.amount_paid !== undefined && Number(visit.amount_paid) > 0) && (
+                                  <span className="text-[11px] font-bold px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 rounded border border-emerald-200 dark:border-emerald-800/60 font-mono shrink-0">
+                                    ${Number(visit.amount_paid).toLocaleString()} USD
+                                  </span>
+                                )}
                                 <div className="flex flex-col">
                                   <span className="text-sm font-bold text-gray-900 dark:text-white">
                                     {formatDate(visit.visited_at)}
@@ -1468,6 +1473,14 @@ export default function PatientsPage() {
                                 <div className="md:col-span-2 bg-amber-50 dark:bg-amber-900/10 p-2 rounded border border-amber-100 dark:border-amber-900/30">
                                   <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 block uppercase tracking-tighter mb-1">Internal Note</span>
                                   <p className="text-sm text-gray-700 dark:text-gray-300 italic">{visit.note}</p>
+                                </div>
+                              )}
+                              {visit.amount_paid !== undefined && (
+                                <div className="md:col-span-2 bg-emerald-50 dark:bg-emerald-950/20 p-2.5 rounded border border-emerald-200 dark:border-emerald-800/40 flex items-center justify-between">
+                                  <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-tighter">Amount Paid for this Visit</span>
+                                  <span className="text-sm font-extrabold text-emerald-800 dark:text-emerald-300 font-mono">
+                                    ${Number(visit.amount_paid || 0).toLocaleString()} USD
+                                  </span>
                                 </div>
                               )}
                             </div>
@@ -1607,7 +1620,36 @@ export default function PatientsPage() {
                     />
                   </div>
                 ))}
-                
+
+                {/* Amount Paid (USD) */}
+                <div className="md:col-span-2 bg-emerald-50/60 dark:bg-emerald-950/20 p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-800/40">
+                  <label className="block text-xs font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-tighter mb-1.5 flex items-center justify-between">
+                    <span>Payment / Amount Paid (USD)</span>
+                    <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900/50 px-2 py-0.5 rounded text-emerald-800 dark:text-emerald-200 font-bold">USD Only</span>
+                  </label>
+                  <div className="relative rounded-lg shadow-sm">
+                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                      <span className="text-emerald-600 font-bold text-base">$</span>
+                    </div>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="w-full pl-8 pr-14 py-2 border border-emerald-300 dark:border-emerald-700 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono font-bold focus:ring-2 focus:ring-emerald-500"
+                      value={editVisitForm.amount_paid !== undefined ? String(editVisitForm.amount_paid) : ''}
+                      onChange={(e) => {
+                        const sanitized = e.target.value.replace(/[^0-9.]/g, '');
+                        const parts = sanitized.split('.');
+                        const formatted = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : sanitized;
+                        setEditVisitForm(prev => ({ ...prev, amount_paid: formatted as any }));
+                      }}
+                      placeholder="0.00"
+                    />
+                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                      <span className="text-xs font-bold text-emerald-600">USD</span>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Investigation Upload — opens real modal */}
                 <div className="md:col-span-2">
                   <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-tighter mb-2 flex items-center gap-2">

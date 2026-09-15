@@ -176,3 +176,57 @@ export async function ensureAppointmentsTableExists() {
     return false;
   }
 }
+
+// Function to ensure the store_purchases table exists
+export async function ensureStorePurchasesTableExists() {
+  try {
+    const { error: checkError } = await supabase
+      .from('store_purchases')
+      .select('id')
+      .limit(1);
+
+    if (checkError) {
+      console.log('store_purchases table may not exist, attempting to create it...');
+
+      const { error: createError } = await supabase.rpc('exec_sql', {
+        sql: `
+          CREATE TABLE IF NOT EXISTS public.store_purchases (
+            id uuid DEFAULT uuid_generate_v4() PRIMARY KEY,
+            item_name text NOT NULL,
+            category text NOT NULL DEFAULT 'Dental Materials',
+            quantity numeric NOT NULL DEFAULT 1,
+            unit text NOT NULL DEFAULT 'piece',
+            unit_price numeric NOT NULL DEFAULT 0,
+            total_price numeric NOT NULL DEFAULT 0,
+            purchase_date date NOT NULL DEFAULT CURRENT_DATE,
+            supplier text DEFAULT '',
+            invoice_number text DEFAULT '',
+            payment_status text NOT NULL DEFAULT 'Paid',
+            payment_method text NOT NULL DEFAULT 'Cash',
+            expiry_date date,
+            notes text DEFAULT '',
+            created_at timestamp with time zone DEFAULT now(),
+            user_id uuid DEFAULT '00000000-0000-0000-0000-000000000000'::uuid
+          );
+          CREATE INDEX IF NOT EXISTS store_purchases_date_idx ON public.store_purchases (purchase_date);
+          CREATE INDEX IF NOT EXISTS store_purchases_user_id_idx ON public.store_purchases (user_id);
+          CREATE INDEX IF NOT EXISTS store_purchases_category_idx ON public.store_purchases (category);
+          NOTIFY pgrst, 'reload schema';
+        `
+      });
+
+      if (createError) {
+        console.warn('Could not auto-create store_purchases via RPC, table may need manual creation:', createError.message);
+        return false;
+      }
+
+      console.log('store_purchases table created successfully');
+      return true;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error checking/creating store_purchases table:', error);
+    return false;
+  }
+}

@@ -28,6 +28,7 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
     pastSurgicalHistory: patient.pastSurgicalHistory || '',
     examination: patient.examination || '',
     note: patient.note || '',
+    amountPaid: patient.amountPaid !== undefined ? String(patient.amountPaid) : '',
     tableData: patient.tableData || '',
     followUpDate: patient.followUpDate || '',
 
@@ -55,6 +56,7 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
       pastSurgicalHistory: patient.pastSurgicalHistory || '',
       examination: patient.examination || '',
       note: patient.note || '',
+      amountPaid: patient.amountPaid !== undefined ? String(patient.amountPaid) : '',
       tableData: patient.tableData || '',
       followUpDate: patient.followUpDate || '',
 
@@ -64,6 +66,16 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    if (name === 'amountPaid') {
+      const sanitized = value.replace(/[^0-9.]/g, '');
+      const parts = sanitized.split('.');
+      const formatted = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : sanitized;
+      setFormData(prev => ({
+        ...prev,
+        amountPaid: formatted
+      }));
+      return;
+    }
     setFormData(prev => ({
       ...prev,
       [name]: value
@@ -708,6 +720,32 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-70 disabled:cursor-not-allowed"
             placeholder="Current treatment details..."
           />
+        </div>
+
+        {/* Treatment Payment (USD) */}
+        <div>
+          <label htmlFor="amountPaid" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
+            Treatment Fee / Payment (USD)
+          </label>
+          <div className="relative rounded-lg shadow-sm">
+            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+              <span className="text-gray-500 dark:text-gray-400 font-bold">$</span>
+            </div>
+            <input
+              type="text"
+              inputMode="decimal"
+              id="amountPaid"
+              name="amountPaid"
+              value={formData.amountPaid}
+              onChange={handleChange}
+              disabled={isLoading}
+              className="w-full pl-8 pr-14 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-bold disabled:opacity-70 disabled:cursor-not-allowed"
+              placeholder="0.00"
+            />
+            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">USD</span>
+            </div>
+          </div>
         </div>
       </div>
 

@@ -29,6 +29,7 @@ export interface Database {
           note: string | null
           follow_up_date: string
           table_data: string
+          amount_paid?: number | null
           created_at: string
           updated_at: string
           user_id: string
@@ -52,6 +53,7 @@ export interface Database {
           note?: string | null
           follow_up_date: string
           table_data: string
+          amount_paid?: number | null
           created_at?: string
           updated_at?: string
           user_id: string
@@ -75,6 +77,7 @@ export interface Database {
           note?: string | null
           follow_up_date?: string
           table_data?: string
+          amount_paid?: number | null
           created_at?: string
           updated_at?: string
           user_id?: string
@@ -95,7 +98,9 @@ export interface Database {
           note: string | null
           follow_up_date: string
           table_data: string
+          amount_paid?: number | null
           visited_at: string
+          created_at?: string
           user_id: string
         }
         Insert: {
@@ -112,7 +117,9 @@ export interface Database {
           note?: string | null
           follow_up_date?: string
           table_data?: string
+          amount_paid?: number | null
           visited_at?: string
+          created_at?: string
           user_id?: string
         }
         Update: {
@@ -129,7 +136,65 @@ export interface Database {
           note?: string | null
           follow_up_date?: string
           table_data?: string
+          amount_paid?: number | null
           visited_at?: string
+          created_at?: string
+          user_id?: string
+        }
+      }
+      store_purchases: {
+        Row: {
+          id: string
+          item_name: string
+          category: string
+          quantity: number
+          unit: string
+          unit_price: number
+          total_price: number
+          purchase_date: string
+          supplier: string
+          invoice_number: string
+          payment_status: string
+          payment_method: string
+          expiry_date?: string | null
+          notes?: string | null
+          created_at: string
+          user_id: string
+        }
+        Insert: {
+          id?: string
+          item_name: string
+          category?: string
+          quantity?: number
+          unit?: string
+          unit_price?: number
+          total_price?: number
+          purchase_date?: string
+          supplier?: string
+          invoice_number?: string
+          payment_status?: string
+          payment_method?: string
+          expiry_date?: string | null
+          notes?: string | null
+          created_at?: string
+          user_id?: string
+        }
+        Update: {
+          id?: string
+          item_name?: string
+          category?: string
+          quantity?: number
+          unit?: string
+          unit_price?: number
+          total_price?: number
+          purchase_date?: string
+          supplier?: string
+          invoice_number?: string
+          payment_status?: string
+          payment_method?: string
+          expiry_date?: string | null
+          notes?: string | null
+          created_at?: string
           user_id?: string
         }
       }
@@ -144,4 +209,4 @@ export interface Database {
       [_ in never]: never
     }
   }
-} 
+}
