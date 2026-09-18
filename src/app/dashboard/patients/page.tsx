@@ -1,12 +1,14 @@
 "use client";
 
-import { useState, useEffect } from 'react';
-import { usePatients, Patient, Visit } from '../../context/PatientContext';
+import { useState, useEffect, useMemo } from 'react';
+import { usePatients, Patient, Visit, ToothSchedule, extractToothSchedulesFromTableData } from '../../context/PatientContext';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import PatientEditForm from '../../components/PatientEditForm';
 import InvestigationModal from '../../components/InvestigationModal';
 import DentitionChart from '../../components/DentitionChart';
+import ToothSchedulerModal from '../../components/ToothSchedulerModal';
+import { Badge } from '../../components/ui/badge';
 import { exportToExcel } from '@/lib/excelExport';
 import { generatePatientPDF } from '@/lib/pdfGenerator';
 import { supabase } from '@/lib/supabase';
@@ -42,6 +44,68 @@ export default function PatientsPage() {
   const [dateFilter, setDateFilter] = useState<string>('today'); // today, yesterday, all, custom
   const [customDateFilterValue, setCustomDateFilterValue] = useState<string>('');
   const [isDeletingVisit, setIsDeletingVisit] = useState<string | null>(null);
+
+  // Clinical Tooth Scheduling & Inbox States
+  const [scheduleFilter, setScheduleFilter] = useState<'all' | 'due_today' | 'next_7_days' | 'has_schedule'>('all');
+  const [showSchedulerModal, setShowSchedulerModal] = useState(false);
+  const [schedulerPatient, setSchedulerPatient] = useState<Patient | null>(null);
+  const [schedulerInitialToothId, setSchedulerInitialToothId] = useState<string | undefined>(undefined);
+
+  // Helper to extract upcoming/next scheduled tooth procedure for any patient
+  const getPatientNextToothSchedule = (patient: Patient): {
+    next: ToothSchedule | null;
+    isDueToday: boolean;
+    isOverdue: boolean;
+    daysRemaining: number | null;
+  } => {
+    const schedules = extractToothSchedulesFromTableData(patient.tableData);
+    if (!schedules || schedules.length === 0) {
+      return { next: null, isDueToday: false, isOverdue: false, daysRemaining: null };
+    }
+    const active = schedules.filter(s => s.status !== 'Completed' && s.status !== 'Cancelled');
+    if (active.length === 0) {
+      return { next: null, isDueToday: false, isOverdue: false, daysRemaining: null };
+    }
+    active.sort((a, b) => new Date(a.targetDate).getTime() - new Date(b.targetDate).getTime());
+    const next = active[0];
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const target = new Date(next.targetDate);
+    target.setHours(0, 0, 0, 0);
+
+    const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    const isDueToday = diffDays === 0;
+    const isOverdue = diffDays < 0;
+
+    return { next, isDueToday, isOverdue, daysRemaining: diffDays };
+  };
+
+  // Computations for Clinical Inbox tabs
+  const { dueTodayCount, next7DaysCount, hasScheduleCount } = useMemo(() => {
+    let dueToday = 0;
+    let next7Days = 0;
+    let hasSchedule = 0;
+
+    patients.forEach(p => {
+      const info = getPatientNextToothSchedule(p);
+      if (info.next) {
+        hasSchedule++;
+        if (info.isDueToday || info.isOverdue) {
+          dueToday++;
+        } else if (info.daysRemaining !== null && info.daysRemaining >= 0 && info.daysRemaining <= 7) {
+          next7Days++;
+        }
+      }
+    });
+
+    return { dueTodayCount: dueToday, next7DaysCount: next7Days, hasScheduleCount: hasSchedule };
+  }, [patients]);
+
+  const selectedPatientSchedules = useMemo(() => {
+    if (!selectedPatient) return [];
+    return extractToothSchedulesFromTableData(selectedPatient.tableData);
+  }, [selectedPatient, selectedPatient?.tableData]);
 
   useEffect(() => {
     setCustomDateFilterValue(new Date().toISOString().split('T')[0]);
@@ -687,7 +751,20 @@ export default function PatientsPage() {
       matchesDate = matchesCreatedDate || matchesVisitDate;
     }
 
-    return matchesSearch && matchesAge && matchesDate;
+    // Smart Tooth Procedure Schedule filter
+    let matchesSchedule = true;
+    if (scheduleFilter !== 'all') {
+      const scheduleInfo = getPatientNextToothSchedule(patient);
+      if (scheduleFilter === 'due_today') {
+        matchesSchedule = Boolean(scheduleInfo.isDueToday || scheduleInfo.isOverdue);
+      } else if (scheduleFilter === 'next_7_days') {
+        matchesSchedule = Boolean(scheduleInfo.daysRemaining !== null && scheduleInfo.daysRemaining >= 0 && scheduleInfo.daysRemaining <= 7);
+      } else if (scheduleFilter === 'has_schedule') {
+        matchesSchedule = Boolean(scheduleInfo.next);
+      }
+    }
+
+    return matchesSearch && matchesAge && matchesDate && matchesSchedule;
   });
 
   // Handle patient selection for details view
@@ -875,6 +952,72 @@ export default function PatientsPage() {
               </button>
             )}
           </div>
+        </div>
+
+        {/* Smart Clinical Queue / Inbox Filter Tabs */}
+        <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
+          <button
+            type="button"
+            onClick={() => setScheduleFilter('all')}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer ${
+              scheduleFilter === 'all'
+                ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 shadow-md'
+                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750'
+            }`}
+          >
+            <span>📁 All Patients</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] ${scheduleFilter === 'all' ? 'bg-white/20 text-white dark:bg-gray-900/20 dark:text-gray-900' : 'bg-gray-100 dark:bg-gray-750 text-gray-600 dark:text-gray-300'}`}>
+              {patients.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setScheduleFilter('due_today')}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer ${
+              scheduleFilter === 'due_today'
+                ? 'bg-red-600 text-white shadow-md shadow-red-500/30'
+                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-red-50 dark:hover:bg-red-950/20 hover:border-red-300'
+            }`}
+          >
+            <span className="flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+              🔥 Due Today & Overdue
+            </span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] ${scheduleFilter === 'due_today' ? 'bg-white/20 text-white' : 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 font-black'}`}>
+              {dueTodayCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setScheduleFilter('next_7_days')}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer ${
+              scheduleFilter === 'next_7_days'
+                ? 'bg-amber-500 text-white shadow-md shadow-amber-500/30'
+                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-amber-50 dark:hover:bg-amber-950/20 hover:border-amber-300'
+            }`}
+          >
+            <span>🗓️ Next 7 Days</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] ${scheduleFilter === 'next_7_days' ? 'bg-white/20 text-white' : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 font-black'}`}>
+              {next7DaysCount}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setScheduleFilter('has_schedule')}
+            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer ${
+              scheduleFilter === 'has_schedule'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/30'
+                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:border-indigo-300'
+            }`}
+          >
+            <span>🦷 With Scheduled Teeth</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] ${scheduleFilter === 'has_schedule' ? 'bg-white/20 text-white' : 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 font-black'}`}>
+              {hasScheduleCount}
+            </span>
+          </button>
         </div>
 
         {/* Search and Filter Section */}
@@ -1083,117 +1226,207 @@ export default function PatientsPage() {
               <h2 className="text-lg font-medium text-gray-900 dark:text-white">Patient List</h2>
             </div>
 
-            <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[600px] overflow-y-auto">
+              <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[600px] overflow-y-auto">
               {filteredPatients.length > 0 ? (
-                filteredPatients.map((patient) => (
-                  <div
-                    key={patient.id}
-                    className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer ${selectedPatient?.id === patient.id ? 'bg-gray-100 dark:bg-gray-700 border-l-4 border-indigo-500' : ''
+                filteredPatients.map((patient) => {
+                  const nextToothInfo = getPatientNextToothSchedule(patient);
+                  return (
+                    <div
+                      key={patient.id}
+                      className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer transition-colors ${
+                        selectedPatient?.id === patient.id ? 'bg-indigo-50/70 dark:bg-indigo-950/40 border-l-4 border-indigo-600' : ''
                       }`}
-                    onClick={() => handleViewPatient(patient)}
-                  >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h3 className="text-sm font-medium text-gray-900 dark:text-white">{patient.name}</h3>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {patientVisitsMap[patient.id] && patientVisitsMap[patient.id].length > 0 && (
-                            <span className="inline-flex items-center text-[9px] bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-bold px-1.5 py-0.5 rounded border border-indigo-100 dark:border-indigo-800/50">
-                              <svg className="h-2 w-2 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" /></svg>
-                              Latest: Visit {patientVisitsMap[patient.id].length}
+                      onClick={() => handleViewPatient(patient)}
+                    >
+                      <div className="flex justify-between items-start">
+                        <div className="min-w-0 flex-1 pr-2">
+                          <h3 className="text-sm font-bold text-gray-900 dark:text-white truncate">{patient.name}</h3>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                            <span className="text-xs text-gray-600 dark:text-gray-300 font-medium">
+                              Age: {calculateAge(patient.dob)}
+                            </span>
+                            {patient.sex && (
+                              <span className="text-xs text-gray-400">· {patient.sex}</span>
+                            )}
+                            {patient.diagnosis && (
+                              <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[140px]">
+                                · {patient.diagnosis}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Prominent First Visit Display — Doctor's Request #1 */}
+                          <div className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 px-2.5 py-1 rounded-md border border-indigo-100 dark:border-indigo-800/60">
+                            <span>📅</span>
+                            <span>1st Visit: {formatDate(patient.createdAt)}</span>
+                          </div>
+                          {/* Remaining Balance / Due Badge */}
+                          {patient.remainingBalance !== undefined && Number(patient.remainingBalance) > 0 && (
+                            <div className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 px-2.5 py-1 rounded-md border border-red-200 dark:border-red-800/60">
+                              <span>⚠️</span>
+                              <span>Due: ${Number(patient.remainingBalance).toLocaleString()}</span>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <span className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 rounded-full px-2.5 py-0.5 font-bold font-mono">
+                            {patient.clinicId}
+                          </span>
+                          {patient.hospitalFileNumber && (
+                            <span className="text-[11px] bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 rounded-full px-2 py-0.5">
+                              #{patient.hospitalFileNumber}
                             </span>
                           )}
-                          <p className="text-xs text-gray-500 dark:text-gray-400">
-                            Age: {calculateAge(patient.dob)} | {patient.diagnosis}
-                          </p>
                         </div>
-                        <p className="text-[10px] text-gray-400 dark:text-gray-500 mt-1">
-                          Added: {formatDate(patient.createdAt)}
-                        </p>
                       </div>
-                      <div className="flex flex-col items-end gap-1">
-                        <span className="text-xs bg-blue-100 text-blue-800 rounded-full px-2 py-0.5 font-medium">
-                          {patient.clinicId}
-                        </span>
-                        <span className="text-xs bg-gray-100 text-gray-700 rounded-full px-2 py-0.5">
-                          {patient.hospitalFileNumber}
-                        </span>
-                      </div>
-                    </div>
 
-                    {/* Quick Actions Row */}
-                    {!isStaffAuth && (
-                      <div className="mt-3 flex items-center gap-2 pt-3 border-t border-gray-100 dark:border-gray-600/50 relative">
-                        {isPerformingQuickAction === patient.id && (
-                          <div className="absolute inset-0 bg-white/60 dark:bg-gray-800/60 z-10 flex items-center justify-center rounded-lg">
-                            <svg className="animate-spin h-4 w-4 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
+                      {/* Next Scheduled Tooth Badge — Doctor's Request #2 */}
+                      {nextToothInfo.next && (
+                        <div className={`mt-2.5 flex items-center justify-between gap-2 p-2 rounded-xl border ${
+                          nextToothInfo.isDueToday
+                            ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800/60'
+                            : nextToothInfo.isOverdue
+                              ? 'bg-orange-50 dark:bg-orange-950/30 border-orange-200 dark:border-orange-800/60'
+                              : 'bg-amber-50/80 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/50'
+                        }`}>
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className={`w-7 h-7 rounded-lg text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs ${
+                              nextToothInfo.isDueToday ? 'bg-red-600' : 'bg-amber-500'
+                            }`}>
+                              #{nextToothInfo.next.toothId}
+                            </span>
+                            <div className="min-w-0 truncate">
+                              <div className="text-xs font-bold text-gray-900 dark:text-white truncate">
+                                {nextToothInfo.next.procedure} {nextToothInfo.next.palmer ? `(${nextToothInfo.next.palmer})` : ''}
+                              </div>
+                              <div className="text-[10px] font-semibold">
+                                {nextToothInfo.isDueToday ? (
+                                  <span className="text-red-600 dark:text-red-400 font-extrabold flex items-center gap-1">
+                                    <span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-ping inline-block" />
+                                    🔥 DUE TODAY {nextToothInfo.next.targetTime ? `at ${nextToothInfo.next.targetTime}` : ''}
+                                  </span>
+                                ) : nextToothInfo.isOverdue ? (
+                                  <span className="text-red-600 dark:text-red-400 font-bold">
+                                    ⚠️ {Math.abs(nextToothInfo.daysRemaining!)}d Overdue ({nextToothInfo.next.targetDate})
+                                  </span>
+                                ) : nextToothInfo.daysRemaining === 1 ? (
+                                  <span className="text-amber-700 dark:text-amber-300 font-bold">
+                                    ⚡ Tomorrow at {nextToothInfo.next.targetTime || '10:00'}
+                                  </span>
+                                ) : (
+                                  <span className="text-indigo-600 dark:text-indigo-400 font-medium">
+                                    ⏰ In {nextToothInfo.daysRemaining} days ({nextToothInfo.next.targetDate})
+                                  </span>
+                                )}
+                              </div>
+                            </div>
                           </div>
-                        )}
-                        
-                        {/* Visit Selector Dropdown */}
-                        <div className="relative">
-                          <select
-                            value={selectedVisitIdMap[patient.id] || (patientVisitsMap[patient.id]?.[0]?.id || '')}
-                            onChange={(e) => {
+                          <button
+                            type="button"
+                            onClick={(e) => {
                               e.stopPropagation();
-                              setSelectedVisitIdMap(prev => ({ ...prev, [patient.id]: e.target.value }));
+                              setSchedulerPatient(patient);
+                              setSchedulerInitialToothId(nextToothInfo.next!.toothId);
+                              setShowSchedulerModal(true);
                             }}
-                            onClick={(e) => e.stopPropagation()}
-                            className="appearance-none text-[10px] font-bold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1.5 pr-6 focus:ring-2 focus:ring-indigo-500 text-gray-700 dark:text-gray-300 cursor-pointer hover:border-indigo-300 transition-colors"
+                            className="text-[10px] font-bold text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-200 px-2 py-1 rounded-md bg-white/80 dark:bg-gray-800/80 border border-amber-200 dark:border-amber-700/60 shadow-xs shrink-0 cursor-pointer"
                           >
-                            {(patientVisitsMap[patient.id] || []).map((v, i, arr) => (
-                              <option key={v.id} value={v.id}>
-                                V{arr.length - i}
-                              </option>
-                            ))}
-                            {(patientVisitsMap[patient.id] || []).length === 0 && (
-                              <option value="">No Visit</option>
-                            )}
-                          </select>
-                          <div className="absolute inset-y-0 right-0 flex items-center px-2 pointer-events-none text-gray-400">
-                            <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                          </div>
+                            Edit
+                          </button>
                         </div>
+                      )}
 
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleQuickAction(patient, 'exam');
-                          }}
-                          disabled={isPerformingQuickAction === patient.id}
-                          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-lg text-[10px] font-bold uppercase tracking-tight hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors border border-blue-100 dark:border-blue-900/30"
-                          title="Quick Examination"
-                        >
-                          Exam
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleQuickAction(patient, 'prescription');
-                          }}
-                          disabled={isPerformingQuickAction === patient.id}
-                          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 rounded-lg text-[10px] font-bold uppercase tracking-tight hover:bg-green-100 dark:hover:bg-green-900/40 transition-colors border border-green-100 dark:border-green-900/30"
-                          title="Quick Prescription"
-                        >
-                          Rx
-                        </button>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleQuickAction(patient, 'investigation');
-                          }}
-                          disabled={isPerformingQuickAction === patient.id}
-                          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 rounded-lg text-[10px] font-bold uppercase tracking-tight hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors border border-purple-100 dark:border-purple-900/30"
-                          title="Quick Investigation Upload"
-                        >
-                          Labs
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                ))
+                      {/* Quick Actions Row */}
+                      {!isStaffAuth && (
+                        <div className="mt-3 flex items-center gap-1.5 pt-2.5 border-t border-gray-100 dark:border-gray-700/60 relative">
+                          {isPerformingQuickAction === patient.id && (
+                            <div className="absolute inset-0 bg-white/60 dark:bg-gray-800/60 z-10 flex items-center justify-center rounded-lg">
+                              <svg className="animate-spin h-4 w-4 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                              </svg>
+                            </div>
+                          )}
+                          
+                          {/* Direct Schedule Tooth button */}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSchedulerPatient(patient);
+                              setSchedulerInitialToothId(undefined);
+                              setShowSchedulerModal(true);
+                            }}
+                            className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold uppercase tracking-tight transition-all shadow-xs flex items-center gap-1 cursor-pointer shrink-0"
+                            title="Schedule Procedure for a Tooth"
+                          >
+                            <span>⚡</span> Tooth
+                          </button>
+
+                          {/* Visit Selector Dropdown */}
+                          <div className="relative">
+                            <select
+                              value={selectedVisitIdMap[patient.id] || (patientVisitsMap[patient.id]?.[0]?.id || '')}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                setSelectedVisitIdMap(prev => ({ ...prev, [patient.id]: e.target.value }));
+                              }}
+                              onClick={(e) => e.stopPropagation()}
+                              className="appearance-none text-[10px] font-bold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1.5 pr-5 focus:ring-2 focus:ring-indigo-500 text-gray-700 dark:text-gray-300 cursor-pointer hover:border-indigo-300 transition-colors"
+                            >
+                              {(patientVisitsMap[patient.id] || []).map((v, i, arr) => (
+                                <option key={v.id} value={v.id}>
+                                  V{arr.length - i}
+                                </option>
+                              ))}
+                              {(patientVisitsMap[patient.id] || []).length === 0 && (
+                                <option value="">No Visit</option>
+                              )}
+                            </select>
+                            <div className="absolute inset-y-0 right-0 flex items-center px-1 pointer-events-none text-gray-400">
+                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+                            </div>
+                          </div>
+
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleQuickAction(patient, 'exam');
+                            }}
+                            disabled={isPerformingQuickAction === patient.id}
+                            className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-lg text-[10px] font-bold uppercase tracking-tight hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors border border-blue-100 dark:border-blue-900/30 cursor-pointer"
+                            title="Quick Examination"
+                          >
+                            Exam
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleQuickAction(patient, 'prescription');
+                            }}
+                            disabled={isPerformingQuickAction === patient.id}
+                            className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 rounded-lg text-[10px] font-bold uppercase tracking-tight hover:bg-green-100 dark:hover:bg-green-900/40 transition-colors border border-green-100 dark:border-green-900/30 cursor-pointer"
+                            title="Quick Prescription"
+                          >
+                            Rx
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleQuickAction(patient, 'investigation');
+                            }}
+                            disabled={isPerformingQuickAction === patient.id}
+                            className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 rounded-lg text-[10px] font-bold uppercase tracking-tight hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors border border-purple-100 dark:border-purple-900/30 cursor-pointer"
+                            title="Quick Investigation Upload"
+                          >
+                            Labs
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })
               ) : (
                 <div className="p-8 text-center text-gray-500 dark:text-gray-400">
                   No patients found. Please add a patient or adjust your search.
@@ -1231,9 +1464,32 @@ export default function PatientsPage() {
                           File #: {selectedPatient.hospitalFileNumber}
                         </span>
                       </div>
-                      <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-                        Added: {formatDate(selectedPatient.createdAt)}
-                      </p>
+                      
+                      {/* Prominent First Visit Admission Card & Quick Tooth Schedule */}
+                      <div className="mt-3 flex items-center gap-3 flex-wrap">
+                        <div className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/60 dark:to-blue-950/60 border border-indigo-200 dark:border-indigo-800/80 px-3.5 py-1.5 rounded-xl shadow-xs">
+                          <span className="text-sm">📅</span>
+                          <div>
+                            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 block leading-tight">
+                              First Visit / Admission Date
+                            </span>
+                            <span className="text-xs font-bold text-gray-900 dark:text-white">
+                              {formatDate(selectedPatient.createdAt)}
+                            </span>
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSchedulerPatient(selectedPatient);
+                            setShowSchedulerModal(true);
+                          }}
+                          className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all hover:scale-105 cursor-pointer"
+                        >
+                          <span>⚡</span> Schedule Tooth Procedure
+                        </button>
+                      </div>
                     </div>
                     <div className="flex space-x-2">
                       <button
@@ -1303,6 +1559,94 @@ export default function PatientsPage() {
                         </div>
                       </div>
                     </div>
+
+                    {/* Payment Breakdown Card */}
+                    {(selectedPatient.totalCost || selectedPatient.amountPaid || selectedPatient.remainingBalance) && (
+                      <div className="bg-gradient-to-br from-emerald-50 to-teal-50/50 dark:from-emerald-950/20 dark:to-teal-950/10 border border-emerald-200 dark:border-emerald-800/60 p-4 rounded-lg">
+                        <h3 className="text-sm font-bold text-emerald-800 dark:text-emerald-300 mb-3 flex items-center gap-2">
+                          <span>💰</span> Payment Breakdown
+                        </h3>
+                        <div className="space-y-2">
+                          {selectedPatient.totalCost && Number(selectedPatient.totalCost) > 0 && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Total Cost</span>
+                              <span className="text-sm font-bold text-gray-900 dark:text-white font-mono">${Number(selectedPatient.totalCost).toLocaleString()}</span>
+                            </div>
+                          )}
+                          {selectedPatient.amountPaid && Number(selectedPatient.amountPaid) >= 0 && (
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Amount Paid</span>
+                              <span className="text-sm font-bold text-emerald-700 dark:text-emerald-300 font-mono">${Number(selectedPatient.amountPaid).toLocaleString()}</span>
+                            </div>
+                          )}
+                          {selectedPatient.remainingBalance !== undefined && (
+                            <div className="flex justify-between items-center pt-2 border-t border-emerald-200 dark:border-emerald-800/40">
+                              <span className="text-xs font-bold text-gray-600 dark:text-gray-300">Balance Due</span>
+                              <span className={`text-sm font-extrabold font-mono px-2 py-0.5 rounded ${
+                                Number(selectedPatient.remainingBalance) > 0
+                                  ? 'text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-700'
+                                  : 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30'
+                              }`}>
+                                {Number(selectedPatient.remainingBalance) > 0 ? `⚠️ $${Number(selectedPatient.remainingBalance).toLocaleString()} DUE` : '✅ Fully Paid'}
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Scheduled Tooth Procedures Management */}
+                  <div className="mb-6 p-4 rounded-2xl bg-gradient-to-br from-indigo-50/70 to-blue-50/40 dark:from-indigo-950/30 dark:to-blue-950/20 border border-indigo-100 dark:border-indigo-800/50 shadow-xs">
+                    <div className="flex items-center justify-between mb-3">
+                      <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2 uppercase tracking-wider">
+                        <span>⏰</span>
+                        <span>Scheduled Tooth Procedures ({selectedPatientSchedules.length})</span>
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSchedulerPatient(selectedPatient);
+                          setSchedulerInitialToothId(undefined);
+                          setShowSchedulerModal(true);
+                        }}
+                        className="text-xs font-bold px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg shadow-sm flex items-center gap-1.5 transition-all hover:scale-105 cursor-pointer"
+                      >
+                        <span>⚡</span> + Schedule Tooth
+                      </button>
+                    </div>
+
+                    {selectedPatientSchedules.length > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {selectedPatientSchedules.map(sch => (
+                          <div
+                            key={sch.id}
+                            className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-gray-800 border border-indigo-200 dark:border-indigo-800/60 shadow-xs"
+                          >
+                            <div className="flex items-center gap-2.5">
+                              <span className="w-8 h-8 rounded-lg bg-indigo-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">
+                                #{sch.toothId}
+                              </span>
+                              <div>
+                                <div className="text-xs font-bold text-gray-900 dark:text-white">
+                                  {sch.procedure} {sch.palmer ? `(${sch.palmer})` : ''}
+                                </div>
+                                <div className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold">
+                                  📅 {sch.targetDate} {sch.targetTime ? `at ${sch.targetTime}` : ''}
+                                </div>
+                              </div>
+                            </div>
+                            <Badge variant={sch.status === 'Completed' ? 'success' : 'warning'} className="text-[10px]">
+                              {sch.status}
+                            </Badge>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-400 dark:text-gray-500 italic">
+                        No procedures scheduled for specific teeth yet. Click &quot;+ Schedule Tooth&quot; to plan next procedure.
+                      </p>
+                    )}
                   </div>
 
                   {/* Dentition Chart Section */}
@@ -1328,10 +1672,16 @@ export default function PatientsPage() {
                       value={selectedPatient.tableData}
                       patientAge={selectedPatient.dob}
                       readOnly={false}
+                      onScheduleTooth={(tooth) => {
+                        const toothId = typeof tooth === 'string' ? tooth : tooth.id;
+                        setSchedulerPatient(selectedPatient);
+                        setSchedulerInitialToothId(toothId);
+                        setShowSchedulerModal(true);
+                      }}
                       onChange={async (newChartVal) => {
                         try {
                           await editPatient(selectedPatient.id, { tableData: newChartVal });
-                          selectedPatient.tableData = newChartVal;
+                          setSelectedPatient(prev => prev ? { ...prev, tableData: newChartVal } : null);
                         } catch (err) {
                           console.error('Failed to auto-save dentition chart', err);
                         }
@@ -1476,11 +1826,36 @@ export default function PatientsPage() {
                                 </div>
                               )}
                               {visit.amount_paid !== undefined && (
-                                <div className="md:col-span-2 bg-emerald-50 dark:bg-emerald-950/20 p-2.5 rounded border border-emerald-200 dark:border-emerald-800/40 flex items-center justify-between">
-                                  <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-tighter">Amount Paid for this Visit</span>
-                                  <span className="text-sm font-extrabold text-emerald-800 dark:text-emerald-300 font-mono">
-                                    ${Number(visit.amount_paid || 0).toLocaleString()} USD
-                                  </span>
+                                <div className="md:col-span-2 bg-emerald-50 dark:bg-emerald-950/20 p-2.5 rounded border border-emerald-200 dark:border-emerald-800/40">
+                                  <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-tighter block mb-1.5">Payment for this Visit</span>
+                                  <div className="flex flex-wrap gap-3">
+                                    {(() => {
+                                      let td: any = {};
+                                      try { td = visit.table_data ? JSON.parse(visit.table_data) : {}; } catch {}
+                                      return (
+                                        <>
+                                          {td.totalCost && Number(td.totalCost) > 0 && (
+                                            <div className="flex flex-col">
+                                              <span className="text-[9px] font-bold text-gray-500 uppercase">Total Cost</span>
+                                              <span className="text-sm font-bold text-gray-900 dark:text-white font-mono">${Number(td.totalCost).toLocaleString()}</span>
+                                            </div>
+                                          )}
+                                          <div className="flex flex-col">
+                                            <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase">Paid</span>
+                                            <span className="text-sm font-extrabold text-emerald-800 dark:text-emerald-300 font-mono">${Number(visit.amount_paid || 0).toLocaleString()} USD</span>
+                                          </div>
+                                          {td.remainingBalance !== undefined && (
+                                            <div className="flex flex-col">
+                                              <span className="text-[9px] font-bold uppercase text-gray-500">Balance</span>
+                                              <span className={`text-sm font-extrabold font-mono ${Number(td.remainingBalance) > 0 ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
+                                                {Number(td.remainingBalance) > 0 ? `⚠️ $${Number(td.remainingBalance).toLocaleString()} DUE` : '✅ Paid'}
+                                              </span>
+                                            </div>
+                                          )}
+                                        </>
+                                      );
+                                    })()}
+                                  </div>
                                 </div>
                               )}
                             </div>
@@ -1621,33 +1996,80 @@ export default function PatientsPage() {
                   </div>
                 ))}
 
-                {/* Amount Paid (USD) */}
-                <div className="md:col-span-2 bg-emerald-50/60 dark:bg-emerald-950/20 p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-800/40">
-                  <label className="block text-xs font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-tighter mb-1.5 flex items-center justify-between">
-                    <span>Payment / Amount Paid (USD)</span>
+                {/* Payment Suite (USD) — 3 fields */}
+                <div className="md:col-span-2 bg-emerald-50/60 dark:bg-emerald-950/20 p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-800/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-tighter flex items-center justify-between">
+                      <span>Payment / USD</span>
+                    </label>
                     <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900/50 px-2 py-0.5 rounded text-emerald-800 dark:text-emerald-200 font-bold">USD Only</span>
-                  </label>
-                  <div className="relative rounded-lg shadow-sm">
-                    <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                      <span className="text-emerald-600 font-bold text-base">$</span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 dark:text-gray-400 mb-1">Total Treatment Cost</label>
+                      <div className="relative rounded-lg shadow-sm">
+                        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                          <span className="text-gray-500 font-bold text-sm">$</span>
+                        </div>
+                        <input
+                          type="text" inputMode="decimal"
+                          className="w-full pl-7 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono font-bold focus:ring-2 focus:ring-emerald-500"
+                          value={(editVisitForm as any).totalCost !== undefined ? String((editVisitForm as any).totalCost) : ''}
+                          onChange={(e) => {
+                            const s = e.target.value.replace(/[^0-9.]/g, '');
+                            const f = s.split('.').length > 2 ? `${s.split('.')[0]}.${s.split('.').slice(1).join('')}` : s;
+                            setEditVisitForm(prev => {
+                              const c = parseFloat(f);
+                              const p = parseFloat(String((prev as any).amount_paid || 0));
+                              const rem = (!isNaN(c) && !isNaN(p)) ? Math.max(0, c - p) : undefined;
+                              return { ...prev, totalCost: f as any, remainingBalance: rem !== undefined ? (rem % 1 === 0 ? String(rem) : rem.toFixed(2)) as any : (prev as any).remainingBalance };
+                            });
+                          }}
+                          placeholder="0.00"
+                        />
+                      </div>
                     </div>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      className="w-full pl-8 pr-14 py-2 border border-emerald-300 dark:border-emerald-700 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono font-bold focus:ring-2 focus:ring-emerald-500"
-                      value={editVisitForm.amount_paid !== undefined ? String(editVisitForm.amount_paid) : ''}
-                      onChange={(e) => {
-                        const sanitized = e.target.value.replace(/[^0-9.]/g, '');
-                        const parts = sanitized.split('.');
-                        const formatted = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : sanitized;
-                        setEditVisitForm(prev => ({ ...prev, amount_paid: formatted as any }));
-                      }}
-                      placeholder="0.00"
-                    />
-                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
-                      <span className="text-xs font-bold text-emerald-600">USD</span>
+                    <div>
+                      <label className="block text-[10px] font-semibold text-gray-500 dark:text-gray-400 mb-1">Amount Paid Now</label>
+                      <div className="relative rounded-lg shadow-sm">
+                        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                          <span className="text-emerald-600 font-bold text-sm">$</span>
+                        </div>
+                        <input
+                          type="text" inputMode="decimal"
+                          className="w-full pl-7 pr-3 py-2 border border-emerald-300 dark:border-emerald-700 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono font-bold focus:ring-2 focus:ring-emerald-500"
+                          value={editVisitForm.amount_paid !== undefined ? String(editVisitForm.amount_paid) : ''}
+                          onChange={(e) => {
+                            const sanitized = e.target.value.replace(/[^0-9.]/g, '');
+                            const parts = sanitized.split('.');
+                            const formatted = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : sanitized;
+                            setEditVisitForm(prev => {
+                              const c = parseFloat(String((prev as any).totalCost || 0));
+                              const p = parseFloat(formatted);
+                              const rem = (!isNaN(c) && !isNaN(p)) ? Math.max(0, c - p) : undefined;
+                              return { ...prev, amount_paid: formatted as any, remainingBalance: rem !== undefined ? (rem % 1 === 0 ? String(rem) : rem.toFixed(2)) as any : (prev as any).remainingBalance };
+                            });
+                          }}
+                          placeholder="0.00"
+                        />
+                      </div>
                     </div>
                   </div>
+                  {/* Remaining Balance — read-only auto-calculated display */}
+                  {(editVisitForm as any).totalCost && editVisitForm.amount_paid !== undefined && (
+                    <div className={`flex items-center justify-between px-3 py-2 rounded-lg border ${
+                      Number((editVisitForm as any).remainingBalance) > 0
+                        ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
+                        : 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40'
+                    }`}>
+                      <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Balance Remaining</span>
+                      <span className={`text-sm font-extrabold font-mono ${
+                        Number((editVisitForm as any).remainingBalance) > 0 ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'
+                      }`}>
+                        {Number((editVisitForm as any).remainingBalance) > 0 ? `⚠️ $${Number((editVisitForm as any).remainingBalance).toLocaleString()} DUE` : '✅ Fully Paid'}
+                      </span>
+                    </div>
+                  )}
                 </div>
 
                 {/* Investigation Upload — opens real modal */}
@@ -1870,6 +2292,37 @@ export default function PatientsPage() {
           patient={quickActionPatient}
           visit={quickActionVisit}
           onClose={() => setShowQuickInvestigationModal(false)}
+        />
+      )}
+
+      {/* ── TOOTH PROCEDURE SCHEDULER MODAL ── */}
+      {showSchedulerModal && schedulerPatient && (
+        <ToothSchedulerModal
+          isOpen={showSchedulerModal}
+          onClose={() => {
+            setShowSchedulerModal(false);
+            setSchedulerPatient(null);
+          }}
+          patient={schedulerPatient}
+          initialToothId={schedulerInitialToothId}
+          onScheduled={async (newSch) => {
+            await refreshPatients();
+            if (selectedPatient && selectedPatient.id === schedulerPatient.id) {
+              try {
+                const cur = selectedPatient.tableData ? JSON.parse(selectedPatient.tableData) : {};
+                const list = cur.scheduledProcedures || [];
+                setSelectedPatient({
+                  ...selectedPatient,
+                  tableData: JSON.stringify({
+                    ...cur,
+                    scheduledProcedures: [...list, newSch]
+                  })
+                });
+              } catch {
+                // ignore
+              }
+            }
+          }}
         />
       )}
     </>

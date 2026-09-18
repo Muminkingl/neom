@@ -50,6 +50,7 @@ export interface DentitionChartData {
     surfaces: ToothSurface[];
     notes?: string;
   }>;
+  scheduledProcedures?: any[];
 }
 
 // ==========================================
@@ -227,9 +228,10 @@ interface ToothModalProps {
   tooth: ToothRecord | null;
   onClose: () => void;
   onSave: (updatedTooth: ToothRecord) => void;
+  onScheduleTooth?: (tooth: ToothRecord) => void;
 }
 
-function ToothInspectorModal({ tooth, onClose, onSave }: ToothModalProps) {
+function ToothInspectorModal({ tooth, onClose, onSave, onScheduleTooth }: ToothModalProps) {
   if (!tooth) return null;
 
   const [currentCondition, setCurrentCondition] = useState<ToothCondition>(tooth.condition);
@@ -356,6 +358,29 @@ function ToothInspectorModal({ tooth, onClose, onSave }: ToothModalProps) {
             </div>
           )}
 
+          {/* Quick Tooth Procedure Scheduler Button */}
+          {onScheduleTooth && (
+            <div className="pt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  onSave({
+                    ...tooth,
+                    condition: currentCondition,
+                    surfaces: currentSurfaces,
+                    notes: currentNotes.trim(),
+                  });
+                  onScheduleTooth(tooth);
+                  onClose();
+                }}
+                className="w-full py-2.5 px-3 bg-gradient-to-r from-indigo-600 via-blue-600 to-indigo-700 hover:from-indigo-500 hover:to-blue-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/25 transition-all border border-indigo-400/40 active:scale-[0.98]"
+              >
+                <span className="text-sm">⚡</span>
+                <span>Schedule Next Procedure for Tooth #{tooth.id} ({tooth.palmer})</span>
+              </button>
+            </div>
+          )}
+
           {/* Tooth Specific Clinical Notes */}
           <div>
             <label htmlFor="modal-tooth-notes" className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">
@@ -416,6 +441,7 @@ interface Tilt3DJawProps {
   imageSrc: string;
   teethCoords: ToothCoord[];
   teethData: Record<string, { condition: ToothCondition; surfaces: ToothSurface[]; notes?: string }>;
+  scheduledToothIds?: Set<string>;
   onToothClick: (tooth: ToothRecord) => void;
   disabled?: boolean;
 }
@@ -425,6 +451,7 @@ function Tilt3DJawChart({
   imageSrc,
   teethCoords,
   teethData,
+  scheduledToothIds,
   onToothClick,
   disabled,
 }: Tilt3DJawProps) {
@@ -534,6 +561,7 @@ function Tilt3DJawChart({
           const hasCondition = condition !== 'sound';
           const conf = CONDITION_CONFIG[condition];
           const isHovered = hoveredTooth?.id === coord.id;
+          const isScheduled = Boolean(scheduledToothIds?.has(coord.id));
 
           return (
             <button
@@ -563,7 +591,7 @@ function Tilt3DJawChart({
                 transformStyle: 'preserve-3d',
               }}
               className="absolute group cursor-pointer focus:outline-none flex items-center justify-center transition-all duration-150 z-20"
-              title={`${coord.name} (Palmer: ${coord.palmer}, FDI: #${coord.id})`}
+              title={`${coord.name} (Palmer: ${coord.palmer}, FDI: #${coord.id})${isScheduled ? ' [Scheduled Procedure]' : ''}`}
             >
               {/* Tooth Interaction Boundary - Smooth contour ring, never covers tooth surface */}
               <div
@@ -586,6 +614,16 @@ function Tilt3DJawChart({
                     className="w-2.5 h-2.5 rounded-full shadow border border-white/60"
                     style={{ backgroundColor: conf.dotColor }}
                   />
+                )}
+
+                {/* Scheduled Procedure Indicator Badge */}
+                {isScheduled && (
+                  <span
+                    className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-400 text-slate-950 font-black text-[9px] flex items-center justify-center shadow-lg border border-white ring-1 ring-amber-500 animate-pulse"
+                    title="Scheduled procedure pending for this tooth"
+                  >
+                    ⚡
+                  </span>
                 )}
               </div>
             </button>
@@ -663,6 +701,7 @@ interface DentitionChartProps {
   patientAge?: string | number; // Patient DOB / Age
   readOnly?: boolean;
   disabled?: boolean;
+  onScheduleTooth?: (tooth: ToothRecord) => void;
 }
 
 export default function DentitionChart({
@@ -671,6 +710,7 @@ export default function DentitionChart({
   patientAge,
   readOnly = false,
   disabled = false,
+  onScheduleTooth,
 }: DentitionChartProps) {
   const [selectedTooth, setSelectedTooth] = useState<ToothRecord | null>(null);
 
@@ -702,16 +742,49 @@ export default function DentitionChart({
     }
   }, [value]);
 
+  // Extract scheduled tooth IDs from tableData
+  const scheduledToothIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (!value) return ids;
+    try {
+      const parsed = JSON.parse(value);
+      if (parsed && Array.isArray(parsed.scheduledProcedures)) {
+        parsed.scheduledProcedures.forEach((sp: any) => {
+          if (sp.toothId && sp.status === 'Scheduled') {
+            ids.add(sp.toothId);
+          }
+        });
+      }
+    } catch {
+      // ignore
+    }
+    return ids;
+  }, [value]);
+
   // Emit changes to parent
   const emitChanges = (updatedTeeth: typeof teethData) => {
     setTeethData(updatedTeeth);
     if (onChange && !readOnly) {
+      // Preserve any scheduledProcedures already in tableData
+      let existingScheduledProcedures: any[] = [];
+      try {
+        if (value) {
+          const parsed = JSON.parse(value);
+          if (parsed && Array.isArray(parsed.scheduledProcedures)) {
+            existingScheduledProcedures = parsed.scheduledProcedures;
+          }
+        }
+      } catch {
+        // ignore
+      }
+
       const payload: DentitionChartData = {
         type: 'dentition_chart',
         version: 5,
         lastUpdated: new Date().toISOString(),
         patientAge: effectiveAge,
         teeth: updatedTeeth,
+        scheduledProcedures: existingScheduledProcedures,
       };
       onChange(JSON.stringify(payload));
     }
@@ -738,6 +811,7 @@ export default function DentitionChart({
           imageSrc="/dental-deciduous.jpg"
           teethCoords={DECIDUOUS_TEETH_COORDS}
           teethData={teethData}
+          scheduledToothIds={scheduledToothIds}
           onToothClick={tooth => !readOnly && setSelectedTooth(tooth)}
           disabled={disabled}
         />
@@ -753,6 +827,7 @@ export default function DentitionChart({
         imageSrc="/dental-permanent.png"
         teethCoords={PERMANENT_TEETH_COORDS}
         teethData={teethData}
+        scheduledToothIds={scheduledToothIds}
         onToothClick={tooth => !readOnly && setSelectedTooth(tooth)}
         disabled={disabled}
       />
@@ -763,6 +838,7 @@ export default function DentitionChart({
           tooth={selectedTooth}
           onClose={() => setSelectedTooth(null)}
           onSave={handleSaveTooth}
+          onScheduleTooth={onScheduleTooth}
         />
       )}
     </div>

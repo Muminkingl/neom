@@ -28,10 +28,11 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
     pastSurgicalHistory: patient.pastSurgicalHistory || '',
     examination: patient.examination || '',
     note: patient.note || '',
+    totalCost: patient.totalCost !== undefined ? String(patient.totalCost) : '',
     amountPaid: patient.amountPaid !== undefined ? String(patient.amountPaid) : '',
+    remainingBalance: patient.remainingBalance !== undefined ? String(patient.remainingBalance) : '',
     tableData: patient.tableData || '',
     followUpDate: patient.followUpDate || '',
-
     // clinicId is read-only, not included in editable form
   });
 
@@ -56,24 +57,35 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
       pastSurgicalHistory: patient.pastSurgicalHistory || '',
       examination: patient.examination || '',
       note: patient.note || '',
+      totalCost: patient.totalCost !== undefined ? String(patient.totalCost) : '',
       amountPaid: patient.amountPaid !== undefined ? String(patient.amountPaid) : '',
+      remainingBalance: patient.remainingBalance !== undefined ? String(patient.remainingBalance) : '',
       tableData: patient.tableData || '',
       followUpDate: patient.followUpDate || '',
-
       // clinicId is read-only, not included in editable form
     });
   }, [patient]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
-    if (name === 'amountPaid') {
+    if (name === 'totalCost' || name === 'amountPaid' || name === 'remainingBalance') {
       const sanitized = value.replace(/[^0-9.]/g, '');
       const parts = sanitized.split('.');
       const formatted = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : sanitized;
-      setFormData(prev => ({
-        ...prev,
-        amountPaid: formatted
-      }));
+      setFormData(prev => {
+        const next = { ...prev, [name]: formatted };
+        if (name === 'totalCost' || name === 'amountPaid') {
+          const c = parseFloat(name === 'totalCost' ? formatted : prev.totalCost);
+          const p = parseFloat(name === 'amountPaid' ? formatted : prev.amountPaid);
+          if (!isNaN(c) && !isNaN(p)) {
+            const diff = Math.max(0, c - p);
+            next.remainingBalance = diff % 1 === 0 ? diff.toString() : diff.toFixed(2);
+          } else {
+            next.remainingBalance = '';
+          }
+        }
+        return next;
+      });
       return;
     }
     setFormData(prev => ({
@@ -652,7 +664,10 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
       </div>
 
       {/* 3D Dentition Chart for Dentist Clinic */}
+    
+    
       <div>
+        
         <label className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
           Dentition Chart (3D Dental Record)
         </label>
@@ -722,30 +737,66 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
           />
         </div>
 
-        {/* Treatment Payment (USD) */}
-        <div>
-          <label htmlFor="amountPaid" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-1">
-            Treatment Fee / Payment (USD)
-          </label>
-          <div className="relative rounded-lg shadow-sm">
-            <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-              <span className="text-gray-500 dark:text-gray-400 font-bold">$</span>
+        {/* Treatment Payment (USD) — 3 field suite */}
+        <div className="p-4 bg-gradient-to-br from-emerald-50 to-teal-50/50 dark:from-emerald-950/20 dark:to-teal-950/10 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-3">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-sm font-bold text-emerald-900 dark:text-emerald-300">💰 Payment (USD)</span>
+            <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 rounded">USD Only</span>
+          </div>
+
+          {/* Row: Total Cost + Amount Paid */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="ef-totalCost" className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Total Treatment Cost</label>
+              <div className="relative">
+                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                  <span className="text-gray-500 dark:text-gray-400 font-bold">$</span>
+                </div>
+                <input
+                  type="text" inputMode="decimal"
+                  id="ef-totalCost" name="totalCost"
+                  value={formData.totalCost}
+                  onChange={handleChange}
+                  disabled={isLoading}
+                  className="w-full pl-7 pr-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-bold disabled:opacity-70"
+                  placeholder="0.00"
+                />
+              </div>
             </div>
-            <input
-              type="text"
-              inputMode="decimal"
-              id="amountPaid"
-              name="amountPaid"
-              value={formData.amountPaid}
-              onChange={handleChange}
-              disabled={isLoading}
-              className="w-full pl-8 pr-14 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-emerald-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-bold disabled:opacity-70 disabled:cursor-not-allowed"
-              placeholder="0.00"
-            />
-            <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
-              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">USD</span>
+            <div>
+              <label htmlFor="ef-amountPaid" className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Amount Paid</label>
+              <div className="relative">
+                <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
+                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">$</span>
+                </div>
+                <input
+                  type="text" inputMode="decimal"
+                  id="ef-amountPaid" name="amountPaid"
+                  value={formData.amountPaid}
+                  onChange={handleChange}
+                  disabled={isLoading}
+                  className="w-full pl-7 pr-3 py-2 border border-emerald-300 dark:border-emerald-700 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-bold disabled:opacity-70"
+                  placeholder="0.00"
+                />
+              </div>
             </div>
           </div>
+
+          {/* Remaining Balance — read-only auto-calculated display */}
+          {formData.totalCost && formData.amountPaid && (
+            <div className={`flex items-center justify-between px-3 py-2 rounded-lg border ${
+              Number(formData.remainingBalance) > 0
+                ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
+                : 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40'
+            }`}>
+              <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Balance Remaining</span>
+              <span className={`text-sm font-extrabold font-mono ${
+                Number(formData.remainingBalance) > 0 ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'
+              }`}>
+                {Number(formData.remainingBalance) > 0 ? `⚠️ $${Number(formData.remainingBalance).toLocaleString()} DUE` : '✅ Fully Paid'}
+              </span>
+            </div>
+          )}
         </div>
       </div>
 

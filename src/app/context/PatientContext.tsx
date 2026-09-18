@@ -27,6 +27,8 @@ export interface Patient {
   followUpDate?: string;
   prescription?: string;
   amountPaid?: number | string;
+  totalCost?: number | string;
+  remainingBalance?: number | string;
   createdAt: string;
   userId?: string;
 }
@@ -48,6 +50,11 @@ export interface Visit {
   table_data: string;
   prescription?: string;
   amount_paid?: number;
+  total_cost?: number;
+  remaining_balance?: number;
+  amountPaid?: number | string;
+  totalCost?: number | string;
+  remainingBalance?: number | string;
   visited_at: string;
   user_id: string;
   investigations?: Array<{ id: string; imageUrl: string; fileName: string; uploadedAt: string }>;
@@ -84,6 +91,36 @@ interface AppointmentRecord {
   user_id: string;
 }
 
+// Define the ToothSchedule interface for tooth-specific clinical appointments
+export interface ToothSchedule {
+  id: string;
+  patientId: string;
+  patientName: string;
+  clinicId?: string;
+  toothId: string; // FDI notation, e.g. "16", "21", "46"
+  palmer: string; // Palmer notation, e.g. "6┘", "└1", "6┐", "┌6"
+  toothName: string; // e.g. "Upper Right 1st Molar"
+  procedure: string; // e.g. "Drill & Composite Fill", "RCT Stage 1"
+  targetDate: string; // YYYY-MM-DD
+  targetTime?: string; // HH:MM
+  status: 'Scheduled' | 'Completed' | 'Cancelled';
+  notes?: string;
+  createdAt: string;
+}
+
+export const extractToothSchedulesFromTableData = (tableData?: string): ToothSchedule[] => {
+  if (!tableData) return [];
+  try {
+    const parsed = JSON.parse(tableData);
+    if (parsed && Array.isArray(parsed.scheduledProcedures)) {
+      return parsed.scheduledProcedures;
+    }
+  } catch (e) {
+    // legacy or non-json format
+  }
+  return [];
+};
+
 // Define the database record shape
 interface PatientRecord {
   id: string;
@@ -114,12 +151,12 @@ interface PatientContextType {
   patients: Patient[];
   isLoading: boolean;
   error: string | null;
-  addPatient: (patient: Omit<Patient, 'id' | 'createdAt' | 'userId'>) => Promise<void>;
+  addPatient: (patient: Omit<Patient, 'id' | 'createdAt' | 'userId'>) => Promise<Patient>;
   editPatient: (id: string, patient: Partial<Omit<Patient, 'id' | 'createdAt' | 'userId'>>) => Promise<void>;
   getPatient: (id: string) => Patient | undefined;
   deletePatient: (id: string) => Promise<void>;
   refreshPatients: () => Promise<void>;
-  addVisit: (patientId: string, visitData: Partial<Patient>) => Promise<void>;
+  addVisit: (patientId: string, visitData: Partial<Patient>) => Promise<{ patient: Patient; visitId?: string } | void>;
   editVisit: (visitId: string, visitData: Partial<Visit>) => Promise<void>;
   deleteVisit: (visitId: string) => Promise<void>;
   getPatientVisits: (patientId: string) => Promise<Visit[]>;
@@ -129,6 +166,11 @@ interface PatientContextType {
   editAppointment: (id: string, appointmentData: Partial<Omit<Appointment, 'id' | 'createdAt' | 'userId'>>) => Promise<void>;
   deleteAppointment: (id: string) => Promise<void>;
   refreshAppointments: () => Promise<void>;
+  scheduleToothProcedure: (schedule: Omit<ToothSchedule, 'id' | 'createdAt'>) => Promise<ToothSchedule>;
+  updateToothProcedure: (patientId: string, scheduleId: string, updates: Partial<ToothSchedule>) => Promise<void>;
+  deleteToothProcedure: (patientId: string, scheduleId: string) => Promise<void>;
+  getPatientToothSchedules: (patient: Patient | null | undefined) => ToothSchedule[];
+  getAllToothSchedules: () => ToothSchedule[];
 }
 
 const PatientContext = createContext<PatientContextType | undefined>(undefined);
@@ -196,30 +238,39 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
 
       if (data) {
         // Map from snake_case to camelCase
-        const formattedPatients = data.map((p: PatientRecord) => ({
-          id: p.id,
-          name: p.name,
-          dob: p.dob || '',
-          hospitalFileNumber: p.hospital_file_number,
-          mobileNumber: p.mobile_number,
-          sex: p.sex,
-          ageOfDiagnosis: p.age_of_diagnosis,
-          diagnosis: p.diagnosis,
-          treatment: p.treatment,
-          currentTreatment: p.current_treatment || '',
-          clinicId: p.clinic_id || '',
-          note: p.note,
-          tableData: p.table_data || '',
-          history: p.history || '',
-          pastMedicalHistory: p.past_medical_history || '',
-          drugHistory: p.drug_history || '',
-          pastSurgicalHistory: p.past_surgical_history || '',
-          examination: p.examination || '',
-          followUpDate: p.follow_up_date || '',
-          amountPaid: p.amount_paid ?? 0,
-          createdAt: p.created_at,
-          userId: p.user_id
-        }));
+        const formattedPatients = data.map((p: PatientRecord) => {
+          let parsedTable: any = {};
+          try {
+            parsedTable = p.table_data ? JSON.parse(p.table_data) : {};
+          } catch {}
+
+          return {
+            id: p.id,
+            name: p.name,
+            dob: p.dob || '',
+            hospitalFileNumber: p.hospital_file_number,
+            mobileNumber: p.mobile_number,
+            sex: p.sex,
+            ageOfDiagnosis: p.age_of_diagnosis,
+            diagnosis: p.diagnosis,
+            treatment: p.treatment,
+            currentTreatment: p.current_treatment || '',
+            clinicId: p.clinic_id || '',
+            note: p.note,
+            tableData: p.table_data || '',
+            history: p.history || '',
+            pastMedicalHistory: p.past_medical_history || '',
+            drugHistory: p.drug_history || '',
+            pastSurgicalHistory: p.past_surgical_history || '',
+            examination: p.examination || '',
+            followUpDate: p.follow_up_date || '',
+            amountPaid: p.amount_paid ?? parsedTable.amountPaid ?? 0,
+            totalCost: parsedTable.totalCost ?? (p as any).total_cost ?? '',
+            remainingBalance: parsedTable.remainingBalance ?? (p as any).remaining_balance ?? '',
+            createdAt: p.created_at,
+            userId: p.user_id
+          };
+        });
 
         setPatients(formattedPatients);
       }
@@ -584,14 +635,23 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
       // Create clinic ID
       const clinicId = `${patientCountFormatted}${dateFormat}`;
 
-      // Always use Supabase for data storage
+      // Merge payment info into tableData JSON so no Supabase schema migrations are needed
+      let tableDataObj: any = {};
+      try {
+        tableDataObj = sanitizedData.tableData ? JSON.parse(sanitizedData.tableData) : {};
+      } catch {}
+      if (sanitizedData.totalCost !== undefined) tableDataObj.totalCost = sanitizedData.totalCost;
+      if (sanitizedData.remainingBalance !== undefined) tableDataObj.remainingBalance = sanitizedData.remainingBalance;
+      if (sanitizedData.amountPaid !== undefined) tableDataObj.amountPaid = sanitizedData.amountPaid;
+      const finalTableData = JSON.stringify(tableDataObj);
+
       const { data, error } = await supabase
         .from('patients')
         .insert({
-          name: sanitizedData.name, // Only name is required
+          name: sanitizedData.name,
           dob: sanitizedData.dob || '',
-          hospital_file_number: sanitizedData.hospitalFileNumber || '',
-          mobile_number: sanitizedData.mobileNumber || '',
+          hospital_file_number: sanitizedData.hospitalFileNumber,
+          mobile_number: sanitizedData.mobileNumber,
           sex: sanitizedData.sex || '',
           age_of_diagnosis: sanitizedData.ageOfDiagnosis || '',
           diagnosis: sanitizedData.diagnosis || '',
@@ -599,7 +659,7 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
           current_treatment: sanitizedData.currentTreatment || '',
           clinic_id: clinicId,
           note: sanitizedData.note || '',
-          table_data: sanitizedData.tableData || '',
+          table_data: finalTableData,
           follow_up_date: sanitizedData.followUpDate || '',
           amount_paid: Number(sanitizedData.amountPaid) || 0,
           user_id: userId
@@ -636,6 +696,8 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
           examination: newPatientData.examination || '',
           followUpDate: newPatientData.follow_up_date || '',
           amountPaid: newPatientData.amount_paid ?? Number(sanitizedData.amountPaid) ?? 0,
+          totalCost: sanitizedData.totalCost ?? '',
+          remainingBalance: sanitizedData.remainingBalance ?? '',
           createdAt: newPatientData.created_at,
           userId: newPatientData.user_id
         };
@@ -675,9 +737,12 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
           }
         } catch (visitErr) {
           console.error('Error logging initial visit for new patient:', visitErr);
-          // Don't throw - we still created the patient successfully
         }
+
+        // Return the created patient
+        return newPatient;
       }
+      throw new Error('Failed to create patient: No data returned');
     } catch (err) {
       console.error('Error adding patient:', err);
       setError('Failed to add patient');
@@ -722,8 +787,20 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
       if (patientData.drugHistory !== undefined) dbData.drug_history = patientData.drugHistory;
       if (patientData.pastSurgicalHistory !== undefined) dbData.past_surgical_history = patientData.pastSurgicalHistory;
       if (patientData.examination !== undefined) dbData.examination = patientData.examination;
-      if (patientData.followUpDate !== undefined) dbData.follow_up_date = patientData.followUpDate;
       if (patientData.amountPaid !== undefined) dbData.amount_paid = Number(patientData.amountPaid) || 0;
+
+      // Merge payment info into table_data JSON
+      if (patientData.totalCost !== undefined || patientData.remainingBalance !== undefined || patientData.tableData !== undefined) {
+        let existingTable: any = {};
+        const currentPatient = patients.find(p => p.id === id);
+        try {
+          existingTable = (patientData.tableData || currentPatient?.tableData) ? JSON.parse(patientData.tableData || currentPatient?.tableData || '{}') : {};
+        } catch {}
+        if (patientData.totalCost !== undefined) existingTable.totalCost = patientData.totalCost;
+        if (patientData.remainingBalance !== undefined) existingTable.remainingBalance = patientData.remainingBalance;
+        if (patientData.amountPaid !== undefined) existingTable.amountPaid = patientData.amountPaid;
+        dbData.table_data = JSON.stringify(existingTable);
+      }
 
       // Always use Supabase for data storage
       const { error } = await supabase
@@ -834,7 +911,14 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
         examination: visitData.examination || '',
         follow_up_date: visitData.followUpDate || '',
         note: visitData.note || '',
-        table_data: visitData.tableData || '',
+        table_data: (() => {
+          let vObj: any = {};
+          try { vObj = visitData.tableData ? JSON.parse(visitData.tableData) : {}; } catch {}
+          if (visitData.totalCost !== undefined) vObj.totalCost = visitData.totalCost;
+          if (visitData.remainingBalance !== undefined) vObj.remainingBalance = visitData.remainingBalance;
+          if (visitData.amountPaid !== undefined) vObj.amountPaid = visitData.amountPaid;
+          return JSON.stringify(vObj);
+        })(),
         amount_paid: Number(visitData.amountPaid ?? (visitData as any).amount_paid) || 0,
         user_id: userId
       };
@@ -871,6 +955,11 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
         setPatients((prevPatients) => prevPatients.map(p => 
           p.id === patientId ? { ...p, ...visitData } : p
         ));
+
+        const targetPat = patients.find(p => p.id === patientId);
+        if (targetPat) {
+          return { patient: { ...targetPat, ...visitData } };
+        }
       }
 
     } catch (err) {
@@ -918,7 +1007,17 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
       if (visitData.follow_up_date !== undefined) dbData.follow_up_date = visitData.follow_up_date;
       if (visitData.note !== undefined) dbData.note = visitData.note;
       if (visitData.prescription !== undefined) dbData.prescription = visitData.prescription;
-      if (visitData.table_data !== undefined) dbData.table_data = visitData.table_data;
+      // Merge totalCost & remainingBalance into table_data JSON (no Supabase schema change needed)
+      if ((visitData as any).totalCost !== undefined || (visitData as any).remainingBalance !== undefined || visitData.table_data !== undefined) {
+        let tableObj: any = {};
+        try { tableObj = visitData.table_data ? JSON.parse(visitData.table_data) : {}; } catch {}
+        if ((visitData as any).totalCost !== undefined) tableObj.totalCost = (visitData as any).totalCost;
+        if ((visitData as any).remainingBalance !== undefined) tableObj.remainingBalance = (visitData as any).remainingBalance;
+        if (visitData.amount_paid !== undefined) tableObj.amountPaid = visitData.amount_paid;
+        dbData.table_data = JSON.stringify(tableObj);
+      } else if (visitData.table_data !== undefined) {
+        dbData.table_data = visitData.table_data;
+      }
       if (visitData.amount_paid !== undefined) dbData.amount_paid = Number(visitData.amount_paid) || 0;
 
       const { error } = await supabase
@@ -964,6 +1063,131 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  // ── TOOTH PROCEDURE SCHEDULING (CLINICAL WORKFLOW) ───────────────────
+  const scheduleToothProcedure = async (scheduleData: Omit<ToothSchedule, 'id' | 'createdAt'>): Promise<ToothSchedule> => {
+    try {
+      const newScheduleId = 'ts-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+      const newSchedule: ToothSchedule = {
+        ...scheduleData,
+        id: newScheduleId,
+        createdAt: new Date().toISOString()
+      };
+
+      const targetPatient = patients.find(p => p.id === scheduleData.patientId);
+      if (!targetPatient) {
+        throw new Error('Patient not found');
+      }
+
+      // Parse existing tableData or initialize clean object
+      let chartObj: any = {};
+      try {
+        chartObj = targetPatient.tableData ? JSON.parse(targetPatient.tableData) : {};
+      } catch (e) {
+        chartObj = {};
+      }
+
+      if (!chartObj || typeof chartObj !== 'object') chartObj = {};
+      if (!Array.isArray(chartObj.scheduledProcedures)) chartObj.scheduledProcedures = [];
+
+      chartObj.scheduledProcedures.push(newSchedule);
+      const updatedTableData = JSON.stringify(chartObj);
+
+      // Update patient in Supabase and state
+      await editPatient(targetPatient.id, {
+        tableData: updatedTableData,
+        followUpDate: scheduleData.targetDate
+      });
+
+      // Synchronize to clinic appointments table so /dashboard/schedule displays it
+      try {
+        await addAppointment({
+          patientName: targetPatient.name,
+          phoneNumber: targetPatient.mobileNumber || '',
+          appointmentDate: scheduleData.targetDate,
+          appointmentTime: scheduleData.targetTime || '10:00',
+          notes: `[Tooth #${scheduleData.toothId} (${scheduleData.palmer})]: ${scheduleData.procedure}${scheduleData.notes ? ' - ' + scheduleData.notes : ''}`,
+          status: 'Scheduled',
+          gender: targetPatient.sex || '',
+          age: targetPatient.dob || '',
+          convertedPatientId: targetPatient.id
+        });
+      } catch (apptErr) {
+        console.warn('Could not auto-add to appointments table:', apptErr);
+      }
+
+      return newSchedule;
+    } catch (err) {
+      console.error('Error scheduling tooth procedure:', err);
+      throw err;
+    }
+  };
+
+  const updateToothProcedure = async (patientId: string, scheduleId: string, updates: Partial<ToothSchedule>) => {
+    try {
+      const targetPatient = patients.find(p => p.id === patientId);
+      if (!targetPatient) throw new Error('Patient not found');
+
+      let chartObj: any = {};
+      try {
+        chartObj = targetPatient.tableData ? JSON.parse(targetPatient.tableData) : {};
+      } catch (e) {
+        chartObj = {};
+      }
+
+      if (chartObj && Array.isArray(chartObj.scheduledProcedures)) {
+        chartObj.scheduledProcedures = chartObj.scheduledProcedures.map((s: ToothSchedule) => 
+          s.id === scheduleId ? { ...s, ...updates } : s
+        );
+
+        await editPatient(patientId, {
+          tableData: JSON.stringify(chartObj)
+        });
+      }
+    } catch (err) {
+      console.error('Error updating tooth procedure:', err);
+      throw err;
+    }
+  };
+
+  const deleteToothProcedure = async (patientId: string, scheduleId: string) => {
+    try {
+      const targetPatient = patients.find(p => p.id === patientId);
+      if (!targetPatient) throw new Error('Patient not found');
+
+      let chartObj: any = {};
+      try {
+        chartObj = targetPatient.tableData ? JSON.parse(targetPatient.tableData) : {};
+      } catch (e) {
+        chartObj = {};
+      }
+
+      if (chartObj && Array.isArray(chartObj.scheduledProcedures)) {
+        chartObj.scheduledProcedures = chartObj.scheduledProcedures.filter((s: ToothSchedule) => s.id !== scheduleId);
+
+        await editPatient(patientId, {
+          tableData: JSON.stringify(chartObj)
+        });
+      }
+    } catch (err) {
+      console.error('Error deleting tooth procedure:', err);
+      throw err;
+    }
+  };
+
+  const getPatientToothSchedules = (patient: Patient | null | undefined): ToothSchedule[] => {
+    if (!patient) return [];
+    return extractToothSchedulesFromTableData(patient.tableData);
+  };
+
+  const getAllToothSchedules = (): ToothSchedule[] => {
+    const list: ToothSchedule[] = [];
+    patients.forEach(p => {
+      const schedules = extractToothSchedulesFromTableData(p.tableData);
+      list.push(...schedules);
+    });
+    return list.sort((a, b) => a.targetDate.localeCompare(b.targetDate));
+  };
+
   return (
     <PatientContext.Provider value={{
       patients,
@@ -983,7 +1207,12 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
       addAppointment,
       editAppointment,
       deleteAppointment,
-      refreshAppointments
+      refreshAppointments,
+      scheduleToothProcedure,
+      updateToothProcedure,
+      deleteToothProcedure,
+      getPatientToothSchedules,
+      getAllToothSchedules
     }}>
       {children}
     </PatientContext.Provider>
