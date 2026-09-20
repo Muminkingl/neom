@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Patient } from '../context/PatientContext';
 import DentitionChart from './DentitionChart';
+import { formatPatientName, normalizeFullNameOnBlur } from '../dashboard/patient-form/page';
 
 interface PatientEditFormProps {
   patient: Patient;
@@ -68,6 +69,14 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    if (name === 'name') {
+      const formattedName = formatPatientName(value);
+      setFormData(prev => ({
+        ...prev,
+        name: formattedName
+      }));
+      return;
+    }
     if (name === 'totalCost' || name === 'amountPaid' || name === 'remainingBalance') {
       const sanitized = value.replace(/[^0-9.]/g, '');
       const parts = sanitized.split('.');
@@ -447,6 +456,12 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
             name="name"
             value={formData.name}
             onChange={handleChange}
+            onBlur={() => {
+              setFormData(prev => ({
+                ...prev,
+                name: normalizeFullNameOnBlur(prev.name)
+              }));
+            }}
             required
             disabled={isLoading}
             className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-70 disabled:cursor-not-allowed"
@@ -738,10 +753,12 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
         </div>
 
         {/* Treatment Payment (USD) — 3 field suite */}
-        <div className="p-4 bg-gradient-to-br from-emerald-50 to-teal-50/50 dark:from-emerald-950/20 dark:to-teal-950/10 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-3">
+        <div className="p-4 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl space-y-3">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-sm font-bold text-emerald-900 dark:text-emerald-300">💰 Payment (USD)</span>
-            <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 rounded">USD Only</span>
+            <span className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+              Payment (USD)
+            </span>
+            <span className="text-[10px] font-semibold text-gray-600 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded">USD Only</span>
           </div>
 
           {/* Row: Total Cost + Amount Paid */}
@@ -758,7 +775,7 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
                   value={formData.totalCost}
                   onChange={handleChange}
                   disabled={isLoading}
-                  className="w-full pl-7 pr-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-bold disabled:opacity-70"
+                  className="w-full pl-7 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-semibold text-sm disabled:opacity-70"
                   placeholder="0.00"
                 />
               </div>
@@ -767,7 +784,7 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
               <label htmlFor="ef-amountPaid" className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Amount Paid</label>
               <div className="relative">
                 <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                  <span className="text-emerald-600 dark:text-emerald-400 font-bold">$</span>
+                  <span className="text-gray-500 dark:text-gray-400 font-bold">$</span>
                 </div>
                 <input
                   type="text" inputMode="decimal"
@@ -775,7 +792,7 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
                   value={formData.amountPaid}
                   onChange={handleChange}
                   disabled={isLoading}
-                  className="w-full pl-7 pr-3 py-2 border border-emerald-300 dark:border-emerald-700 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-bold disabled:opacity-70"
+                  className="w-full pl-7 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-semibold text-sm disabled:opacity-70"
                   placeholder="0.00"
                 />
               </div>
@@ -787,13 +804,17 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
             <div className={`flex items-center justify-between px-3 py-2 rounded-lg border ${
               Number(formData.remainingBalance) > 0
                 ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
-                : 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40'
+                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
             }`}>
               <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Balance Remaining</span>
               <span className={`text-sm font-extrabold font-mono ${
-                Number(formData.remainingBalance) > 0 ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'
+                Number(formData.remainingBalance) > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-800 dark:text-gray-200'
               }`}>
-                {Number(formData.remainingBalance) > 0 ? `⚠️ $${Number(formData.remainingBalance).toLocaleString()} DUE` : '✅ Fully Paid'}
+                {Number(formData.remainingBalance) > 0 ? (
+                  <span>⚠️ ${Number(formData.remainingBalance).toLocaleString()} DUE</span>
+                ) : (
+                  <span>Fully Paid</span>
+                )}
               </span>
             </div>
           )}

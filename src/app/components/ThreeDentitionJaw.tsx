@@ -3,6 +3,8 @@
 import React, { useRef, useEffect, useState, useMemo } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import ToothIcon from './ToothIcon';
+import { RotateCcw, ChevronUp, ChevronDown } from 'lucide-react';
 
 // ==========================================
 // TYPES & DEFINITIONS
@@ -479,7 +481,7 @@ export default function ThreeDentitionJaw({
       {/* Sleek Minimal Header with Live Palmer HUD */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3 px-2">
         <div className="flex items-center gap-2.5">
-          <span className="text-xl">🦷</span>
+          <ToothIcon className="w-5 h-5 text-indigo-400" />
           <h4 className="text-base font-bold text-white tracking-tight">{title}</h4>
         </div>
 
@@ -509,26 +511,29 @@ export default function ThreeDentitionJaw({
           <button
             type="button"
             onClick={resetCamera}
-            className="px-2.5 py-1 text-[11px] font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg border border-gray-700 transition-colors"
+            className="px-2.5 py-1 text-[11px] font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg border border-gray-700 transition-colors flex items-center gap-1 cursor-pointer"
             title="Reset front perspective"
           >
-            🔄 Reset 3D
+            <RotateCcw className="w-3 h-3 text-indigo-400" />
+            <span>Reset 3D</span>
           </button>
           <button
             type="button"
             onClick={viewUpper}
-            className="px-2.5 py-1 text-[11px] font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg border border-gray-700 transition-colors"
+            className="px-2.5 py-1 text-[11px] font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg border border-gray-700 transition-colors flex items-center gap-1 cursor-pointer"
             title="View Upper Maxillary Arch"
           >
-            ⬆️ Upper Arch
+            <ChevronUp className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Upper Arch</span>
           </button>
           <button
             type="button"
             onClick={viewLower}
-            className="px-2.5 py-1 text-[11px] font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg border border-gray-700 transition-colors"
+            className="px-2.5 py-1 text-[11px] font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg border border-gray-700 transition-colors flex items-center gap-1 cursor-pointer"
             title="View Lower Mandibular Arch"
           >
-            ⬇️ Lower Arch
+            <ChevronDown className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Lower Arch</span>
           </button>
         </div>
       </div>

@@ -4,10 +4,58 @@ import { useState, useEffect, useMemo, Suspense } from 'react';
 import { usePatients, Patient, ToothSchedule, extractToothSchedulesFromTableData } from '../../context/PatientContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '../../context/AuthContext';
-import DentitionChart, { parseEffectiveAge, ToothRecord } from '../../components/DentitionChart';
+import DentitionChart, { parseEffectiveAge, ToothRecord, extractDiagnosedTeeth, DiagnosedTooth, CONDITION_CONFIG } from '../../components/DentitionChart';
 import ToothSchedulerModal from '../../components/ToothSchedulerModal';
+import { ToothIcon } from '../../components/ToothIcon';
 import { Badge } from '../../components/ui/badge';
 import { generatePatientPDF } from '@/lib/pdfGenerator';
+import {
+  Calendar,
+  Users,
+  Zap,
+  DollarSign,
+  Clock,
+  Phone,
+  AlertCircle,
+  CheckCircle2,
+  FileText,
+  FolderKanban,
+  Plus,
+  Trash2,
+  Sparkles,
+  Stethoscope,
+  Activity,
+  AlertTriangle,
+  ChevronRight,
+  CreditCard,
+  Check,
+  Tag
+} from 'lucide-react';
+
+/**
+ * Automatically format patient name to Title Case as typed
+ * e.g., "mumin muhammed ghareeb" -> "Mumin Muhammed Ghareeb"
+ */
+export const formatPatientName = (input: string): string => {
+  if (!input) return '';
+  return input.replace(/(?:^|[\s\-'])\p{L}/gu, m => m.toUpperCase());
+};
+
+/**
+ * On blur cleanup, handles all-caps words (e.g. "MUMIN" -> "Mumin")
+ */
+export const normalizeFullNameOnBlur = (input: string): string => {
+  if (!input) return '';
+  return input
+    .split(/(\s+)/)
+    .map(segment => {
+      if (/^\p{Lu}{2,}$/u.test(segment)) {
+        return segment.charAt(0).toUpperCase() + segment.slice(1).toLowerCase();
+      }
+      return segment.replace(/(?:^|[\s\-'])\p{L}/gu, m => m.toUpperCase());
+    })
+    .join('');
+};
 
 function PatientFormContent() {
   const { addPatient, addVisit, editAppointment, patients, isLoading, error } = usePatients();
@@ -56,6 +104,49 @@ function PatientFormContent() {
     // clinicId is not included here as it's auto-generated
   });
 
+  // Chart-driven diagnosed teeth extracted from dentition chart JSON
+  const diagnosedTeeth = useMemo(() => {
+    return extractDiagnosedTeeth(formData.tableData);
+  }, [formData.tableData]);
+
+  // General non-tooth diagnoses and customized tooth treatments
+  const [generalDiagnoses, setGeneralDiagnoses] = useState<string[]>([]);
+  const [customDiagnosisInput, setCustomDiagnosisInput] = useState('');
+  const [toothTreatments, setToothTreatments] = useState<Record<string, string>>({});
+  const [generalTreatmentNotes, setGeneralTreatmentNotes] = useState('');
+
+  // Synchronize compiled diagnosis string into formData
+  useEffect(() => {
+    const parts: string[] = [];
+    diagnosedTeeth.forEach(t => {
+      let desc = `${t.name} (Tooth #${t.toothId}, ${t.palmer}): ${t.conditionLabel}`;
+      if (t.surfaces && t.surfaces.length > 0) desc += ` [Surfaces: ${t.surfaces.join('')}]`;
+      if (t.notes) desc += ` (${t.notes})`;
+      parts.push(desc);
+    });
+    generalDiagnoses.forEach(g => {
+      if (g.trim()) parts.push(g.trim());
+    });
+    const compiled = parts.join('; ');
+    setFormData(prev => (prev.diagnosis === compiled ? prev : { ...prev, diagnosis: compiled }));
+  }, [diagnosedTeeth, generalDiagnoses]);
+
+  // Synchronize compiled treatment string into formData
+  useEffect(() => {
+    const parts: string[] = [];
+    diagnosedTeeth.forEach(t => {
+      const plan = toothTreatments[t.toothId]?.trim();
+      if (plan) {
+        parts.push(`Tooth #${t.toothId} (${t.palmer} ${t.name}): ${plan}`);
+      }
+    });
+    if (generalTreatmentNotes.trim()) {
+      parts.push(`General / Overall: ${generalTreatmentNotes.trim()}`);
+    }
+    const compiled = parts.join('; ');
+    setFormData(prev => (prev.treatment === compiled ? prev : { ...prev, treatment: compiled }));
+  }, [diagnosedTeeth, toothTreatments, generalTreatmentNotes]);
+
   // Pre-fill from query parameters (appointments workflow)
   useEffect(() => {
     const name = searchParams.get('name');
@@ -92,6 +183,14 @@ function PatientFormContent() {
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
+    if (name === 'name') {
+      const formattedName = formatPatientName(value);
+      setFormData(prev => ({
+        ...prev,
+        name: formattedName
+      }));
+      return;
+    }
     if (name === 'totalCost' || name === 'amountPaid' || name === 'remainingBalance') {
       const sanitized = value.replace(/[^0-9.]/g, '');
       const parts = sanitized.split('.');
@@ -190,6 +289,10 @@ function PatientFormContent() {
       tableData: '',
       followUpDate: '',
     });
+    setGeneralDiagnoses([]);
+    setCustomDiagnosisInput('');
+    setToothTreatments({});
+    setGeneralTreatmentNotes('');
     setFormSubmitted(false);
     setSavedPatient(null);
     setSelectedPatient(null);
@@ -272,7 +375,7 @@ function PatientFormContent() {
             <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4 pb-6 border-b border-gray-100 dark:border-gray-700">
               <div className="flex items-center gap-4">
                 <div className="w-14 h-14 rounded-2xl bg-emerald-100 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-700 flex items-center justify-center text-3xl shadow-sm">
-                  ✅
+                  <CheckCircle2 className="w-8 h-8 text-emerald-600 dark:text-emerald-400" />
                 </div>
                 <div>
                   <div className="flex items-center gap-2 flex-wrap">
@@ -288,10 +391,14 @@ function PatientFormContent() {
                       </Badge>
                     )}
                   </div>
-                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                    {savedPatient.sex && `${savedPatient.sex} • `}
-                    {savedPatient.dob ? `Age: ${savedPatient.dob}` : ''}
-                    {savedPatient.mobileNumber && ` • 📞 ${savedPatient.mobileNumber}`}
+                  <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1.5 flex-wrap">
+                    {savedPatient.sex && <span>{savedPatient.sex} •</span>}
+                    {savedPatient.dob && <span>Age: {savedPatient.dob}</span>}
+                    {savedPatient.mobileNumber && (
+                      <span className="flex items-center gap-1">
+                        • <Phone className="w-3.5 h-3.5 text-gray-400" /> {savedPatient.mobileNumber}
+                      </span>
+                    )}
                   </p>
                 </div>
               </div>
@@ -299,7 +406,7 @@ function PatientFormContent() {
               {/* Prominent First Visit Box */}
               <div className="w-full md:w-auto bg-gradient-to-br from-indigo-50 to-blue-50 dark:from-indigo-950/40 dark:to-blue-950/40 border border-indigo-200 dark:border-indigo-800 rounded-2xl p-3.5 sm:px-5 text-left md:text-right shadow-sm">
                 <div className="text-[11px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider flex items-center md:justify-end gap-1.5">
-                  <span>📅</span> FIRST VISIT / ADMISSION
+                  <Calendar className="w-3.5 h-3.5" /> FIRST VISIT / ADMISSION
                 </div>
                 <div className="text-base sm:text-lg font-bold text-gray-900 dark:text-white mt-0.5">
                   {formatVisitDateTime(savedPatient.createdAt)}
@@ -307,18 +414,18 @@ function PatientFormContent() {
                 {/* Payment Summary: Total / Paid / Due */}
                 <div className="mt-1.5 flex flex-wrap gap-2">
                   {savedPatient.totalCost && Number(savedPatient.totalCost) > 0 && (
-                    <span className="text-[11px] font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-md">
-                      💊 Total: ${Number(savedPatient.totalCost).toLocaleString()}
+                    <span className="text-[11px] font-bold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 px-2 py-0.5 rounded-md flex items-center gap-1">
+                      <CreditCard className="w-3 h-3 text-gray-500" /> Total: ${Number(savedPatient.totalCost).toLocaleString()}
                     </span>
                   )}
                   {savedPatient.amountPaid && Number(savedPatient.amountPaid) > 0 && (
-                    <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/40 px-2 py-0.5 rounded-md">
-                      💵 Paid: ${Number(savedPatient.amountPaid).toLocaleString()}
+                    <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/40 px-2 py-0.5 rounded-md flex items-center gap-1">
+                      <DollarSign className="w-3 h-3 text-emerald-600" /> Paid: ${Number(savedPatient.amountPaid).toLocaleString()}
                     </span>
                   )}
                   {savedPatient.remainingBalance && Number(savedPatient.remainingBalance) > 0 && (
-                    <span className="text-[11px] font-bold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/40 px-2 py-0.5 rounded-md border border-red-200 dark:border-red-700 animate-pulse">
-                      ⚠️ Due: ${Number(savedPatient.remainingBalance).toLocaleString()}
+                    <span className="text-[11px] font-bold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/40 px-2 py-0.5 rounded-md border border-red-200 dark:border-red-700 animate-pulse flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3 text-red-600" /> Due: ${Number(savedPatient.remainingBalance).toLocaleString()}
                     </span>
                   )}
                 </div>
@@ -330,11 +437,11 @@ function PatientFormContent() {
               <div>
                 <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                   <h3 className="text-sm font-bold text-gray-800 dark:text-gray-200 uppercase tracking-wider flex items-center gap-2">
-                    <span>🦷</span>
+                    <ToothIcon className="w-4 h-4 text-amber-500" />
                     <span>Marked Teeth & Findings ({markedTeethList.length})</span>
                   </h3>
-                  <span className="text-xs text-indigo-600 dark:text-indigo-400 font-medium">
-                    ⚡ Click any tooth below to schedule its procedure
+                  <span className="text-xs text-indigo-600 dark:text-indigo-400 font-medium flex items-center gap-1">
+                    <Zap className="w-3.5 h-3.5 text-amber-500" /> Click any tooth below to schedule its procedure
                   </span>
                 </div>
                 {markedTeethList.length > 0 ? (
@@ -362,7 +469,7 @@ function PatientFormContent() {
                             </div>
                           )}
                         </div>
-                        <span className="text-xs text-amber-500">⚡</span>
+                        <Zap className="w-3.5 h-3.5 text-amber-500" />
                       </button>
                     ))}
                   </div>
@@ -376,7 +483,7 @@ function PatientFormContent() {
               {/* Scheduled Procedures List */}
               <div>
                 <h3 className="text-sm font-bold text-gray-800 dark:text-gray-200 uppercase tracking-wider mb-3 flex items-center gap-2">
-                  <span>⏰</span>
+                  <Clock className="w-4 h-4 text-indigo-500" />
                   <span>Scheduled Procedures ({savedPatientSchedules.length})</span>
                 </h3>
                 {savedPatientSchedules.length > 0 ? (
@@ -394,8 +501,8 @@ function PatientFormContent() {
                             <div className="text-xs font-bold text-gray-900 dark:text-white">
                               {sch.procedure} {sch.palmer ? `(${sch.palmer})` : ''}
                             </div>
-                            <div className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium">
-                              📅 {sch.targetDate} {sch.targetTime ? `at ${sch.targetTime}` : ''}
+                            <div className="text-[11px] text-indigo-600 dark:text-indigo-400 font-medium flex items-center gap-1">
+                              <Calendar className="w-3 h-3 text-indigo-500" /> {sch.targetDate} {sch.targetTime ? `at ${sch.targetTime}` : ''}
                             </div>
                           </div>
                         </div>
@@ -423,7 +530,7 @@ function PatientFormContent() {
                 }}
                 className="w-full sm:w-auto flex-1 py-3 px-5 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 hover:from-amber-600 hover:to-orange-700 text-white font-bold rounded-xl shadow-lg shadow-amber-500/25 flex items-center justify-center gap-2 transition-all hover:scale-[1.02] cursor-pointer"
               >
-                <span className="text-lg">⚡</span>
+                <Zap className="w-4 h-4" />
                 <span>Schedule Tooth Procedure</span>
               </button>
 
@@ -442,7 +549,7 @@ function PatientFormContent() {
                 }}
                 className="w-full sm:w-auto py-3 px-5 bg-white dark:bg-gray-700 hover:bg-gray-50 dark:hover:bg-gray-600 text-gray-800 dark:text-white font-semibold rounded-xl border border-gray-200 dark:border-gray-600 shadow-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
               >
-                <span>📄</span>
+                <FileText className="w-4 h-4 text-gray-600 dark:text-gray-300" />
                 <span>{isPrinting ? 'Printing…' : 'Print Visit Sheet'}</span>
               </button>
 
@@ -451,7 +558,7 @@ function PatientFormContent() {
                 onClick={() => router.push(`/dashboard/patients?id=${savedPatient.id}`)}
                 className="w-full sm:w-auto py-3 px-5 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/50 dark:hover:bg-indigo-900/60 text-indigo-700 dark:text-indigo-300 font-semibold rounded-xl border border-indigo-200 dark:border-indigo-800 transition-colors flex items-center justify-center gap-2 cursor-pointer"
               >
-                <span>📁</span>
+                <FolderKanban className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                 <span>Go to Directory</span>
               </button>
 
@@ -460,7 +567,7 @@ function PatientFormContent() {
                 onClick={handleResetForNextPatient}
                 className="w-full sm:w-auto py-3 px-5 bg-gray-100 hover:bg-gray-200 dark:bg-gray-750 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-200 font-semibold rounded-xl transition-colors flex items-center justify-center gap-2 cursor-pointer"
               >
-                <span>➕</span>
+                <Plus className="w-4 h-4" />
                 <span>Register Next</span>
               </button>
             </div>
@@ -476,16 +583,16 @@ function PatientFormContent() {
               <button
                 type="button"
                 onClick={() => { setMode('new'); setSelectedPatient(null); setSearchQuery(''); setSearchResults([]); }}
-                className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${mode === 'new' ? 'bg-white dark:bg-gray-800 shadow text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}
+                className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-1.5 ${mode === 'new' ? 'bg-white dark:bg-gray-800 shadow text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}
               >
-                🆕 New Patient
+                <Plus className="w-4 h-4" /> New Patient
               </button>
               <button
                 type="button"
                 onClick={() => { setMode('existing'); setSelectedPatient(null); setSearchQuery(''); setSearchResults([]); }}
-                className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all ${mode === 'existing' ? 'bg-white dark:bg-gray-800 shadow text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}
+                className={`flex-1 py-2.5 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-1.5 ${mode === 'existing' ? 'bg-white dark:bg-gray-800 shadow text-indigo-600 dark:text-indigo-400' : 'text-gray-500 dark:text-gray-400 hover:text-gray-700'}`}
               >
-                🔁 Returning Patient
+                <Users className="w-4 h-4" /> Returning Patient
               </button>
             </div>
 
@@ -513,9 +620,13 @@ function PatientFormContent() {
                         className="w-full text-left px-4 py-3 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 border-b border-gray-100 dark:border-gray-700 last:border-0 transition-colors"
                       >
                         <div className="font-medium text-gray-900 dark:text-white">{p.name}</div>
-                        <div className="text-xs text-gray-500 mt-0.5">
-                          {p.mobileNumber && <span className="mr-3">📞 {p.mobileNumber}</span>}
-                          {p.dob && <span>DOB: {p.dob}</span>}
+                        <div className="text-xs text-gray-500 mt-0.5 flex items-center gap-2">
+                          {p.mobileNumber && (
+                            <span className="flex items-center gap-1">
+                              <Phone className="w-3 h-3 text-gray-400" /> {p.mobileNumber}
+                            </span>
+                          )}
+                          {p.dob && <span>• DOB: {p.dob}</span>}
                         </div>
                       </button>
                     ))}
@@ -535,7 +646,11 @@ function PatientFormContent() {
                 <div>
                   <p className="text-xs text-indigo-500 font-medium mb-0.5">Returning visit for</p>
                   <p className="font-bold text-indigo-900 dark:text-indigo-100">{selectedPatient.name}</p>
-                  {selectedPatient.mobileNumber && <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-0.5">📞 {selectedPatient.mobileNumber}</p>}
+                  {selectedPatient.mobileNumber && (
+                    <p className="text-xs text-indigo-600 dark:text-indigo-400 mt-0.5 flex items-center gap-1">
+                      <Phone className="w-3 h-3 text-indigo-500" /> {selectedPatient.mobileNumber}
+                    </p>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -579,6 +694,12 @@ function PatientFormContent() {
                       name="name"
                       value={formData.name}
                       onChange={handleChange}
+                      onBlur={() => {
+                        setFormData(prev => ({
+                          ...prev,
+                          name: normalizeFullNameOnBlur(prev.name)
+                        }));
+                      }}
                       required
                       disabled={isLoading || formSubmitted}
                       className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70"
@@ -650,10 +771,13 @@ function PatientFormContent() {
                 </div>
 
                 {/* Payment Suite (USD) — Total Cost + Amount Paid */}
-                <div className="p-4 bg-gradient-to-br from-emerald-50 to-teal-50/50 dark:from-emerald-950/20 dark:to-teal-950/10 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-3">
+                <div className="p-4 bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 rounded-xl space-y-3">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-sm font-bold text-emerald-900 dark:text-emerald-300">💰 Payment (USD)</span>
-                    <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/40 px-2 py-0.5 rounded">USD Only</span>
+                    <span className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                      <DollarSign className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                      <span>Payment (USD)</span>
+                    </span>
+                    <span className="text-[10px] font-semibold text-gray-600 dark:text-gray-300 bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded">USD Only</span>
                   </div>
 
                   {/* Row: Total Cost + Amount Paid */}
@@ -670,7 +794,7 @@ function PatientFormContent() {
                           value={formData.totalCost}
                           onChange={handleChange}
                           disabled={isLoading || formSubmitted}
-                          className="w-full pl-7 pr-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-semibold text-sm"
+                          className="w-full pl-7 pr-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-semibold text-sm"
                           placeholder="0.00"
                         />
                       </div>
@@ -679,7 +803,7 @@ function PatientFormContent() {
                       <label htmlFor="rec-amountPaid" className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1">Amount Paid Now</label>
                       <div className="relative">
                         <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                          <span className="text-emerald-600 dark:text-emerald-400 font-bold">$</span>
+                          <span className="text-gray-500 dark:text-gray-400 font-bold">$</span>
                         </div>
                         <input
                           type="text" inputMode="decimal"
@@ -687,7 +811,7 @@ function PatientFormContent() {
                           value={formData.amountPaid}
                           onChange={handleChange}
                           disabled={isLoading || formSubmitted}
-                          className="w-full pl-7 pr-3 py-2.5 border border-emerald-300 dark:border-emerald-700 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-semibold text-sm"
+                          className="w-full pl-7 pr-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-semibold text-sm"
                           placeholder="0.00"
                         />
                       </div>
@@ -699,13 +823,23 @@ function PatientFormContent() {
                     <div className={`flex items-center justify-between px-3 py-2 rounded-lg border ${
                       Number(formData.remainingBalance) > 0
                         ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
-                        : 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40'
+                        : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
                     }`}>
                       <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Balance Remaining</span>
                       <span className={`text-sm font-extrabold font-mono ${
-                        Number(formData.remainingBalance) > 0 ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'
+                        Number(formData.remainingBalance) > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-800 dark:text-gray-200'
                       }`}>
-                        {Number(formData.remainingBalance) > 0 ? `⚠️ $${Number(formData.remainingBalance).toLocaleString()} DUE` : '✅ Fully Paid'}
+                        {Number(formData.remainingBalance) > 0 ? (
+                          <span className="flex items-center gap-1">
+                            <AlertCircle className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />
+                            ${Number(formData.remainingBalance).toLocaleString()} DUE
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-1">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />
+                            Fully Paid
+                          </span>
+                        )}
                       </span>
                     </div>
                   )}
@@ -909,6 +1043,12 @@ function PatientFormContent() {
                         name="name"
                         value={formData.name}
                         onChange={handleChange}
+                        onBlur={() => {
+                          setFormData(prev => ({
+                            ...prev,
+                            name: normalizeFullNameOnBlur(prev.name)
+                          }));
+                        }}
                         required
                         disabled={isLoading || formSubmitted}
                         className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
@@ -969,23 +1109,6 @@ function PatientFormContent() {
                         placeholder="Mobile number"
                       />
                     </div>
-
-                    {/* Age/Year of Diagnosis */}
-                    <div>
-                      <label htmlFor="ageOfDiagnosis" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                        Age/Year of Diagnosis
-                      </label>
-                      <input
-                        type="text"
-                        id="ageOfDiagnosis"
-                        name="ageOfDiagnosis"
-                        value={formData.ageOfDiagnosis}
-                        onChange={handleChange}
-                        disabled={isLoading || formSubmitted}
-                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                        placeholder="Age or year"
-                      />
-                    </div>
                   </div>
                 </div>
               )}
@@ -1012,57 +1135,77 @@ function PatientFormContent() {
                       )}
                     </div>
 
-                    {/* Age of Diagnosis */}
-                    <div className="md:col-span-2">
-                      <label htmlFor="ageOfDiagnosis2" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                        Age/Year of Diagnosis
-                      </label>
-                      <input
-                        type="text"
-                        id="ageOfDiagnosis2"
-                        name="ageOfDiagnosis"
-                        value={formData.ageOfDiagnosis}
-                        onChange={handleChange}
-                        disabled={isLoading || formSubmitted}
-                        className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                        placeholder="Age or year"
-                      />
+                    {/* Date of Diagnosis / Condition Onset */}
+                    <div className="md:col-span-2 bg-indigo-50/40 dark:bg-indigo-950/20 p-4 rounded-xl border border-indigo-100 dark:border-indigo-800/50">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1 mb-2">
+                        <label htmlFor="ageOfDiagnosis" className="block text-sm font-bold text-gray-800 dark:text-gray-200 flex items-center gap-1.5">
+                          <Calendar className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+                          <span>Date of Diagnosis / Condition Onset</span>
+                        </label>
+                        <span className="text-xs text-indigo-600 dark:text-indigo-400 font-medium">
+                          Select date or click quick shortcut
+                        </span>
+                      </div>
+                      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                        <input
+                          type="date"
+                          id="ageOfDiagnosis"
+                          name="ageOfDiagnosis"
+                          value={formData.ageOfDiagnosis}
+                          onChange={handleChange}
+                          disabled={isLoading || formSubmitted}
+                          className="px-4 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-medium text-sm transition-all duration-200"
+                        />
+                        {/* Quick shortcuts for fast 1-click entry */}
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {[
+                            { label: 'Today', days: 0 },
+                            { label: '1 Wk Ago', days: -7 },
+                            { label: '1 Mo Ago', months: -1 },
+                            { label: '3 Mos Ago', months: -3 },
+                            { label: '6 Mos Ago', months: -6 },
+                            { label: '1 Yr Ago', months: -12 },
+                          ].map((btn, i) => (
+                            <button
+                              key={i}
+                              type="button"
+                              onClick={() => {
+                                const d = new Date();
+                                if (btn.days !== undefined) d.setDate(d.getDate() + btn.days);
+                                if (btn.months !== undefined) d.setMonth(d.getMonth() + btn.months);
+                                const formatted = d.toISOString().split('T')[0];
+                                setFormData(prev => ({ ...prev, ageOfDiagnosis: formatted }));
+                              }}
+                              className="px-2.5 py-1 text-xs font-semibold rounded-md bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-indigo-50 dark:hover:bg-indigo-900/40 hover:text-indigo-600 dark:hover:text-indigo-300 transition-colors shadow-2xs cursor-pointer"
+                            >
+                              {btn.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      {formData.ageOfDiagnosis && (
+                        <p className="mt-2 text-xs text-indigo-600 dark:text-indigo-400 font-medium flex items-center gap-1">
+                          <Check className="w-3.5 h-3.5" />
+                          Recorded Onset Date: {formData.ageOfDiagnosis}
+                        </p>
+                      )}
                     </div>
 
-                    {/* History */}
-                    {!isStaff && (
-                      <div className="md:col-span-2">
-                        <label htmlFor="history" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                          History
-                        </label>
-                        <textarea
-                          id="history"
-                          name="history"
-                          value={formData.history}
-                          onChange={handleChange}
-                          rows={3}
-                          disabled={isLoading || formSubmitted || isStaff}
-                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                          placeholder="History details..."
-                        />
-                      </div>
-                    )}
-
-                    {/* Past Medical History */}
+                    {/* Medical History */}
                     {!isStaff && (
                       <div className="md:col-span-2">
                         <label htmlFor="pastMedicalHistory" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                          Past Medical History
+                          Medical History
                         </label>
                         <textarea
                           id="pastMedicalHistory"
                           name="pastMedicalHistory"
                           value={formData.pastMedicalHistory}
                           onChange={handleChange}
-                          rows={2}
+                          rows={3}
                           disabled={isLoading || formSubmitted || isStaff}
                           className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                          placeholder="Past medical history details..."
+                          placeholder="Relevant medical history, systemic conditions, chronic illnesses, allergies..."
                         />
                       </div>
                     )}
@@ -1081,7 +1224,7 @@ function PatientFormContent() {
                           rows={2}
                           disabled={isLoading || formSubmitted || isStaff}
                           className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                          placeholder="Drug history details..."
+                          placeholder="Current medications, anesthesia sensitivities, or drug allergies..."
                         />
                       </div>
                     )}
@@ -1100,45 +1243,7 @@ function PatientFormContent() {
                           rows={2}
                           disabled={isLoading || formSubmitted || isStaff}
                           className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                          placeholder="Past surgical history details..."
-                        />
-                      </div>
-                    )}
-
-                    {/* Examination */}
-                    {!isStaff && (
-                      <div className="md:col-span-2">
-                        <label htmlFor="examination" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                          Examination
-                        </label>
-                        <textarea
-                          id="examination"
-                          name="examination"
-                          value={formData.examination}
-                          onChange={handleChange}
-                          rows={3}
-                          disabled={isLoading || formSubmitted || isStaff}
-                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                          placeholder="Examination details..."
-                        />
-                      </div>
-                    )}
-
-                    {/* Follow up date */}
-                    {!isStaff && (
-                      <div className="md:col-span-2">
-                        <label htmlFor="followUpDate" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                          Follow Up Date
-                        </label>
-                        <input
-                          type="text"
-                          id="followUpDate"
-                          name="followUpDate"
-                          value={formData.followUpDate}
-                          onChange={handleChange}
-                          disabled={isLoading || formSubmitted || isStaff}
-                          className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                          placeholder="Follow up date"
+                          placeholder="Past dental or general surgeries, extractions, implants..."
                         />
                       </div>
                     )}
@@ -1179,83 +1284,184 @@ function PatientFormContent() {
                         />
                       </div>
 
-                      {/* Fields directly after the chart: Diagnosis, Treatment, Current Treatment */}
+                      {/* Fields directly after the chart: Clinical Diagnosis Badges & Per-Tooth Treatment Planner */}
                       <div className="space-y-6 pt-4 border-t border-gray-100 dark:border-gray-700">
-                        {/* Diagnosis */}
-                        <div>
-                          <label htmlFor="diagnosis" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                            Diagnosis
+                        {/* Clinical Diagnoses derived from chart */}
+                        <div className="p-4 sm:p-5 rounded-2xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 space-y-3">
+                          <label className="block text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                            <Stethoscope className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                            <span>Clinical Diagnoses{diagnosedTeeth.length + generalDiagnoses.length > 0 ? ` (${diagnosedTeeth.length + generalDiagnoses.length})` : ''}</span>
                           </label>
-                          <input
-                            type="text"
-                            id="diagnosis"
-                            name="diagnosis"
-                            value={formData.diagnosis}
-                            onChange={handleChange}
-                            disabled={isLoading || formSubmitted || isStaff}
-                            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                            placeholder="Patient diagnosis"
-                          />
+
+                          {diagnosedTeeth.length > 0 ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {diagnosedTeeth.map(t => {
+                                return (
+                                  <div
+                                    key={t.toothId}
+                                    className="flex items-center gap-2.5 p-2.5 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700"
+                                  >
+                                    <span className="w-8 h-8 rounded-lg bg-gray-700 dark:bg-gray-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
+                                      #{t.toothId}
+                                    </span>
+                                    <div className="min-w-0">
+                                      <div className="text-xs font-bold text-gray-900 dark:text-white truncate">
+                                        {t.name} <span className="text-gray-500 dark:text-gray-400 font-mono">({t.palmer})</span>
+                                      </div>
+                                      <div className="text-[11px] font-semibold text-gray-500 dark:text-gray-400 mt-0.5">
+                                        {t.conditionLabel}{t.surfaces && t.surfaces.length > 0 ? ` · ${t.surfaces.join(', ')}` : ''}
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-gray-400 dark:text-gray-500">
+                              Click any tooth in the chart above to record a finding — it will appear here automatically.
+                            </p>
+                          )}
+
+                          {/* General diagnoses tags */}
+                          {generalDiagnoses.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 pt-1 border-t border-gray-200 dark:border-gray-700">
+                              {generalDiagnoses.map((gd, idx) => (
+                                <span
+                                  key={idx}
+                                  className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-600"
+                                >
+                                  {gd}
+                                  <button
+                                    type="button"
+                                    onClick={() => setGeneralDiagnoses(prev => prev.filter((_, i) => i !== idx))}
+                                    className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 cursor-pointer font-bold"
+                                  >
+                                    ×
+                                  </button>
+                                </span>
+                              ))}
+                            </div>
+                          )}
+
+                          {/* Custom tag input */}
+                          <div className="flex items-center gap-2 pt-1">
+                            <input
+                              type="text"
+                              value={customDiagnosisInput}
+                              onChange={e => setCustomDiagnosisInput(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  if (customDiagnosisInput.trim()) {
+                                    setGeneralDiagnoses(prev => [...prev, customDiagnosisInput.trim()]);
+                                    setCustomDiagnosisInput('');
+                                  }
+                                }
+                              }}
+                              placeholder="Add general finding & press Enter..."
+                              className="flex-1 text-xs px-3 py-1.5 rounded-lg bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 text-gray-800 dark:text-gray-200 placeholder-gray-400 focus:ring-1 focus:ring-gray-400"
+                            />
+                            {customDiagnosisInput.trim() && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setGeneralDiagnoses(prev => [...prev, customDiagnosisInput.trim()]);
+                                  setCustomDiagnosisInput('');
+                                }}
+                                className="text-xs font-semibold px-3 py-1.5 rounded-lg bg-gray-700 dark:bg-gray-600 text-white cursor-pointer"
+                              >
+                                Add
+                              </button>
+                            )}
+                          </div>
                         </div>
 
-                        {/* Treatment */}
-                        <div>
-                          <label htmlFor="treatment" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                            Treatment
+                        {/* Tooth-Specific Treatment Plan */}
+                        <div className="p-4 sm:p-5 rounded-2xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 space-y-3">
+                          <label className="block text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                            <Activity className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                            <span>Treatment Plan{diagnosedTeeth.length > 0 ? ` (${diagnosedTeeth.length} teeth)` : ''}</span>
                           </label>
-                          <input
-                            type="text"
-                            id="treatment"
-                            name="treatment"
-                            value={formData.treatment}
-                            onChange={handleChange}
-                            disabled={isLoading || formSubmitted || isStaff}
-                            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                            placeholder="Treatment information"
-                          />
-                        </div>
 
-                        {/* Current Treatment */}
-                        <div>
-                          <label htmlFor="currentTreatment" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                            Current Treatment
-                          </label>
-                          <textarea
-                            id="currentTreatment"
-                            name="currentTreatment"
-                            value={formData.currentTreatment}
-                            onChange={handleChange}
-                            rows={3}
-                            disabled={isLoading || formSubmitted || isStaff}
-                            className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                            placeholder="Current treatment details..."
-                          />
+                          {diagnosedTeeth.length > 0 ? (
+                            <div className="space-y-2">
+                              {diagnosedTeeth.map(t => (
+                                <div
+                                  key={t.toothId}
+                                  className="p-3 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 space-y-2"
+                                >
+                                  <div className="flex items-center gap-2">
+                                    <span className="w-7 h-7 rounded-lg bg-gray-700 dark:bg-gray-600 text-white font-bold text-xs flex items-center justify-center shrink-0">
+                                      #{t.toothId}
+                                    </span>
+                                    <span className="text-xs font-bold text-gray-900 dark:text-white">
+                                      {t.name} <span className="text-gray-500 dark:text-gray-400 font-mono">({t.palmer})</span>
+                                    </span>
+                                    <span className="text-[10px] font-medium px-2 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">
+                                      {t.conditionLabel}
+                                    </span>
+                                  </div>
+                                  <input
+                                    type="text"
+                                    value={toothTreatments[t.toothId] || ''}
+                                    onChange={e => {
+                                      const val = e.target.value;
+                                      setToothTreatments(prev => ({ ...prev, [t.toothId]: val }));
+                                    }}
+                                    disabled={isLoading || formSubmitted || isStaff}
+                                    placeholder={`Planned procedure for tooth #${t.toothId}...`}
+                                    className="w-full px-3 py-2 text-xs border border-gray-200 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white focus:ring-1 focus:ring-gray-400 dark:focus:ring-gray-500"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-xs text-gray-400 dark:text-gray-500">
+                              Tooth-specific plan will appear here once teeth are diagnosed in the chart above.
+                            </p>
+                          )}
+
+                          {/* Overall Treatment / Prescription Plan */}
+                          <div>
+                            <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
+                              General Treatment & Prescription Notes
+                            </label>
+                            <input
+                              type="text"
+                              value={generalTreatmentNotes}
+                              onChange={e => setGeneralTreatmentNotes(e.target.value)}
+                              disabled={isLoading || formSubmitted || isStaff}
+                              placeholder="e.g. Full mouth scaling, Amoxicillin 500mg, oral hygiene instructions..."
+                              className="w-full px-3.5 py-2.5 text-xs border border-gray-200 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-1 focus:ring-gray-400"
+                            />
+                          </div>
                         </div>
 
                         {/* Notes */}
                         <div>
                           <label htmlFor="note" className="block text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
-                            Notes
+                            Additional Clinical Notes
                           </label>
                           <textarea
                             id="note"
                             name="note"
                             value={formData.note}
                             onChange={handleChange}
-                            rows={4}
+                            rows={3}
                             disabled={isLoading || formSubmitted || isStaff}
                             className="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-gray-50 dark:bg-gray-700/50 text-gray-900 dark:text-white disabled:opacity-70 transition-all duration-200"
-                            placeholder="Enter any additional notes or observations about the patient..."
+                            placeholder="Enter any additional clinical notes or observations about the patient..."
                           />
                         </div>
 
                         {/* Payment Suite — 3 fields: Total Cost, Amount Paid, Remaining Due */}
-                        <div className="p-5 bg-gradient-to-br from-emerald-50 to-teal-50/50 dark:from-emerald-950/20 dark:to-teal-950/10 border border-emerald-200 dark:border-emerald-800/60 rounded-xl space-y-4">
+                        <div className="p-4 sm:p-5 rounded-2xl bg-gray-50 dark:bg-gray-800/50 border border-gray-200 dark:border-gray-700 space-y-4">
                           <div className="flex items-center justify-between">
-                            <label className="block text-sm font-bold text-emerald-900 dark:text-emerald-300">
-                              💰 Treatment Payment (USD Only)
+                            <label className="block text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                              <DollarSign className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                              <span>Treatment Payment</span>
                             </label>
-                            <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-200">
+                            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300">
                               USD ($)
                             </span>
                           </div>
@@ -1274,7 +1480,7 @@ function PatientFormContent() {
                                   value={formData.totalCost}
                                   onChange={handleChange}
                                   disabled={isLoading || formSubmitted || isStaff}
-                                  className="w-full pl-8 pr-3 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-bold text-base"
+                                  className="w-full pl-8 pr-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-bold text-sm"
                                   placeholder="0.00"
                                 />
                               </div>
@@ -1283,7 +1489,7 @@ function PatientFormContent() {
                               <label htmlFor="amountPaid" className="block text-xs font-semibold text-gray-600 dark:text-gray-300 mb-1.5">Amount Paid Now</label>
                               <div className="relative">
                                 <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-                                  <span className="text-emerald-600 dark:text-emerald-400 font-bold text-base">$</span>
+                                  <span className="text-gray-500 dark:text-gray-400 font-bold text-base">$</span>
                                 </div>
                                 <input
                                   type="text" inputMode="decimal"
@@ -1291,7 +1497,7 @@ function PatientFormContent() {
                                   value={formData.amountPaid}
                                   onChange={handleChange}
                                   disabled={isLoading || formSubmitted || isStaff}
-                                  className="w-full pl-8 pr-3 py-3 border border-emerald-300 dark:border-emerald-700 rounded-lg focus:ring-2 focus:ring-emerald-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-bold text-base"
+                                  className="w-full pl-8 pr-3 py-2.5 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white font-mono font-bold text-sm"
                                   placeholder="0.00"
                                 />
                               </div>
@@ -1303,21 +1509,29 @@ function PatientFormContent() {
                             <div className={`flex items-center justify-between px-3.5 py-2.5 rounded-lg border ${
                               Number(formData.remainingBalance) > 0
                                 ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
-                                : 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40'
+                                : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
                             }`}>
                               <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Balance Remaining</span>
-                              <span className={`text-base font-extrabold font-mono ${
-                                Number(formData.remainingBalance) > 0 ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'
+                              <span className={`text-sm font-extrabold font-mono ${
+                                Number(formData.remainingBalance) > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-800 dark:text-gray-200'
                               }`}>
-                                {Number(formData.remainingBalance) > 0 ? `⚠️ $${Number(formData.remainingBalance).toLocaleString()} DUE` : '✅ Fully Paid'}
+                                {Number(formData.remainingBalance) > 0 ? (
+                                  <span className="flex items-center gap-1.5">
+                                    <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400" />
+                                    ${Number(formData.remainingBalance).toLocaleString()} DUE
+                                  </span>
+                                ) : (
+                                  <span className="flex items-center gap-1.5">
+                                    <CheckCircle2 className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+                                    Fully Paid
+                                  </span>
+                                )}
                               </span>
                             </div>
                           )}
 
-                          <p className="text-xs text-emerald-700 dark:text-emerald-400/90 flex items-center gap-1.5">
-                            <svg className="w-3.5 h-3.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
-                            </svg>
+                          <p className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1.5">
+                            <Check className="w-3.5 h-3.5 shrink-0" />
                             Enter total cost and amount paid — remaining balance is auto-calculated.
                           </p>
                         </div>
@@ -1385,12 +1599,13 @@ function PatientFormContent() {
             </div>
           </form>
         </div>
+              </>
+            )}
           </>
         )}
-          </>
-        )}
-          </>
-        )}
+      </>
+    )}
+
 
         {/* ── TOOTH PROCEDURE SCHEDULER MODAL ── */}
         {showSchedulerModal && (savedPatient || selectedPatient) && (

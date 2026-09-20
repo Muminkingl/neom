@@ -1,21 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { S3Client, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 
-const r2 = new S3Client({
-  region: 'auto',
-  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-  credentials: {
-    accessKeyId:     process.env.R2_ACCESS_KEY_ID!,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
-  },
-});
-
-const BUCKET = process.env.R2_BUCKET_NAME!;
+const BUCKET = process.env.R2_BUCKET_NAME;
 
 // DELETE /api/r2/delete-patient
 // Body JSON: { patientId }
 export async function DELETE(req: NextRequest) {
   try {
+    // R2 not configured — skip silently so patient deletion still succeeds
+    if (!BUCKET || !process.env.R2_ACCOUNT_ID || !process.env.R2_ACCESS_KEY_ID) {
+      return NextResponse.json({ success: true, message: 'R2 not configured, skipping cleanup' });
+    }
+
+    const r2 = new S3Client({
+      region: 'auto',
+      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId:     process.env.R2_ACCESS_KEY_ID!,
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY!,
+      },
+    });
+
     const { patientId } = await req.json();
     if (!patientId) {
       return NextResponse.json({ error: 'Missing patientId' }, { status: 400 });
@@ -35,19 +40,14 @@ export async function DELETE(req: NextRequest) {
     }
 
     // 2. Delete all found objects
-    const deleteParams = {
+    await r2.send(new DeleteObjectsCommand({
       Bucket: BUCKET,
       Delete: {
         Objects: listedObjects.Contents.map(({ Key }) => ({ Key })),
       },
-    };
+    }));
 
-    await r2.send(new DeleteObjectsCommand(deleteParams));
-
-    // 3. If there are more than 1000 objects (pagination), we should handle that
-    // but for medical investigations per patient, it's very unlikely to exceed 1000.
-    // However, if needed, a loop could be added here.
-
+    // Note: pagination not handled here (unlikely to exceed 1000 objects per patient)
     return NextResponse.json({ success: true, count: listedObjects.Contents.length });
   } catch (err) {
     console.error('[R2 Delete Patient Error]', err);

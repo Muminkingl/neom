@@ -4,6 +4,8 @@ import React, { useState, useRef, useMemo } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
+import ToothIcon from './ToothIcon';
+import { RotateCcw, ChevronUp, ChevronDown } from 'lucide-react';
 
 // ==========================================
 // DENTAL TYPES & PALMER DEFINITIONS
@@ -505,7 +507,7 @@ export default function Real3DDentalJaw({
       {/* Header bar with Palmer Live HUD & Quick Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3 px-2">
         <div className="flex items-center gap-2.5">
-          <span className="text-xl">🦷</span>
+          <ToothIcon className="w-5 h-5 text-indigo-400" />
           <h4 className="text-base font-bold text-white tracking-tight">{title}</h4>
           {treatedCount > 0 && (
             <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
@@ -545,26 +547,29 @@ export default function Real3DDentalJaw({
           <button
             type="button"
             onClick={handleResetCamera}
-            className="px-2.5 py-1 text-[11px] font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg border border-gray-700 transition-colors"
+            className="px-2.5 py-1 text-[11px] font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg border border-gray-700 transition-colors flex items-center gap-1 cursor-pointer"
             title="Reset front perspective"
           >
-            🔄 Reset
+            <RotateCcw className="w-3 h-3 text-indigo-400" />
+            <span>Reset</span>
           </button>
           <button
             type="button"
             onClick={handleUpperArch}
-            className="px-2.5 py-1 text-[11px] font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg border border-gray-700 transition-colors"
+            className="px-2.5 py-1 text-[11px] font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg border border-gray-700 transition-colors flex items-center gap-1 cursor-pointer"
             title="Upper Arch Occlusal View"
           >
-            ⬆️ Upper
+            <ChevronUp className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Upper</span>
           </button>
           <button
             type="button"
             onClick={handleLowerArch}
-            className="px-2.5 py-1 text-[11px] font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg border border-gray-700 transition-colors"
+            className="px-2.5 py-1 text-[11px] font-semibold bg-gray-800 hover:bg-gray-700 text-gray-300 hover:text-white rounded-lg border border-gray-700 transition-colors flex items-center gap-1 cursor-pointer"
             title="Lower Arch Occlusal View"
           >
-            ⬇️ Lower
+            <ChevronDown className="w-3.5 h-3.5 text-indigo-400" />
+            <span>Lower</span>
           </button>
         </div>
       </div>

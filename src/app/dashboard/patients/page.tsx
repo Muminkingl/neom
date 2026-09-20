@@ -13,6 +13,12 @@ import { exportToExcel } from '@/lib/excelExport';
 import { generatePatientPDF } from '@/lib/pdfGenerator';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '../../context/AuthContext';
+import ToothIcon from '../../components/ToothIcon';
+import {
+  Users, Flame, Calendar, Zap, Clock, AlertTriangle, CheckCircle2,
+  DollarSign, CreditCard, AlertCircle, TrendingUp, FolderKanban,
+  Pencil
+} from 'lucide-react';
 
 export default function PatientsPage() {
   const { patients, deletePatient, editPatient, isLoading, error, refreshPatients, getPatientVisits, editVisit, deleteVisit } = usePatients();
@@ -106,6 +112,27 @@ export default function PatientsPage() {
     if (!selectedPatient) return [];
     return extractToothSchedulesFromTableData(selectedPatient.tableData);
   }, [selectedPatient, selectedPatient?.tableData]);
+
+  // Multi-visit aggregate financials for the selected patient
+  const selectedPatientFinancials = useMemo(() => {
+    if (!patientVisits || patientVisits.length === 0) {
+      return { totalSpent: 0, totalDue: 0, totalInvoiced: 0, visitsCount: 0 };
+    }
+    let totalSpent = 0;
+    let totalDue = 0;
+    let totalInvoiced = 0;
+    for (const v of patientVisits) {
+      const paid = Number(v.amount_paid || 0);
+      totalSpent += paid;
+      let td: any = {};
+      try { td = v.table_data ? JSON.parse(v.table_data) : {}; } catch {}
+      const cost = Number(td.totalCost || 0);
+      const rem = Number(td.remainingBalance || 0);
+      totalInvoiced += cost;
+      totalDue += rem;
+    }
+    return { totalSpent, totalDue, totalInvoiced, visitsCount: patientVisits.length };
+  }, [patientVisits]);
 
   useEffect(() => {
     setCustomDateFilterValue(new Date().toISOString().split('T')[0]);
@@ -931,7 +958,7 @@ export default function PatientsPage() {
               <button
                 onClick={handleExportToExcel}
                 disabled={isExporting || filteredPatients.length === 0}
-                className="px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-green-400 text-white rounded-lg shadow-md transition duration-150 inline-flex items-center"
+                className="px-4 py-2 bg-slate-700 hover:bg-slate-800 dark:bg-slate-600 dark:hover:bg-slate-500 disabled:opacity-50 text-white rounded-lg shadow-md transition duration-150 inline-flex items-center"
               >
                 {isExporting ? (
                   <>
@@ -965,7 +992,7 @@ export default function PatientsPage() {
                 : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750'
             }`}
           >
-            <span>📁 All Patients</span>
+            <span className="flex items-center gap-1.5"><FolderKanban className="w-3.5 h-3.5" /> All Patients</span>
             <span className={`px-2 py-0.5 rounded-full text-[10px] ${scheduleFilter === 'all' ? 'bg-white/20 text-white dark:bg-gray-900/20 dark:text-gray-900' : 'bg-gray-100 dark:bg-gray-750 text-gray-600 dark:text-gray-300'}`}>
               {patients.length}
             </span>
@@ -982,7 +1009,7 @@ export default function PatientsPage() {
           >
             <span className="flex items-center gap-1.5">
               <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-              🔥 Due Today & Overdue
+              <Flame className="w-3.5 h-3.5" /> Due Today & Overdue
             </span>
             <span className={`px-2 py-0.5 rounded-full text-[10px] ${scheduleFilter === 'due_today' ? 'bg-white/20 text-white' : 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 font-black'}`}>
               {dueTodayCount}
@@ -994,12 +1021,12 @@ export default function PatientsPage() {
             onClick={() => setScheduleFilter('next_7_days')}
             className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer ${
               scheduleFilter === 'next_7_days'
-                ? 'bg-amber-500 text-white shadow-md shadow-amber-500/30'
-                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-amber-50 dark:hover:bg-amber-950/20 hover:border-amber-300'
+                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/30'
+                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:border-indigo-300'
             }`}
           >
-            <span>🗓️ Next 7 Days</span>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] ${scheduleFilter === 'next_7_days' ? 'bg-white/20 text-white' : 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300 font-black'}`}>
+            <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" /> Next 7 Days</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] ${scheduleFilter === 'next_7_days' ? 'bg-white/20 text-white' : 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 font-black'}`}>
               {next7DaysCount}
             </span>
           </button>
@@ -1013,7 +1040,7 @@ export default function PatientsPage() {
                 : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:border-indigo-300'
             }`}
           >
-            <span>🦷 With Scheduled Teeth</span>
+            <span className="flex items-center gap-1.5"><ToothIcon className="w-3.5 h-3.5" /> With Scheduled Teeth</span>
             <span className={`px-2 py-0.5 rounded-full text-[10px] ${scheduleFilter === 'has_schedule' ? 'bg-white/20 text-white' : 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 font-black'}`}>
               {hasScheduleCount}
             </span>
@@ -1257,13 +1284,13 @@ export default function PatientsPage() {
 
                           {/* Prominent First Visit Display — Doctor's Request #1 */}
                           <div className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 px-2.5 py-1 rounded-md border border-indigo-100 dark:border-indigo-800/60">
-                            <span>📅</span>
+                            <Calendar className="w-3 h-3 text-gray-400" />
                             <span>1st Visit: {formatDate(patient.createdAt)}</span>
                           </div>
                           {/* Remaining Balance / Due Badge */}
                           {patient.remainingBalance !== undefined && Number(patient.remainingBalance) > 0 && (
                             <div className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 px-2.5 py-1 rounded-md border border-red-200 dark:border-red-800/60">
-                              <span>⚠️</span>
+                              <AlertTriangle className="w-3 h-3" />
                               <span>Due: ${Number(patient.remainingBalance).toLocaleString()}</span>
                             </div>
                           )}
@@ -1284,15 +1311,13 @@ export default function PatientsPage() {
                       {/* Next Scheduled Tooth Badge — Doctor's Request #2 */}
                       {nextToothInfo.next && (
                         <div className={`mt-2.5 flex items-center justify-between gap-2 p-2 rounded-xl border ${
-                          nextToothInfo.isDueToday
+                          nextToothInfo.isDueToday || nextToothInfo.isOverdue
                             ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800/60'
-                            : nextToothInfo.isOverdue
-                              ? 'bg-orange-50 dark:bg-orange-950/30 border-orange-200 dark:border-orange-800/60'
-                              : 'bg-amber-50/80 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/50'
+                            : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/60'
                         }`}>
                           <div className="flex items-center gap-2 min-w-0">
                             <span className={`w-7 h-7 rounded-lg text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs ${
-                              nextToothInfo.isDueToday ? 'bg-red-600' : 'bg-amber-500'
+                              nextToothInfo.isDueToday || nextToothInfo.isOverdue ? 'bg-red-600' : 'bg-indigo-600'
                             }`}>
                               #{nextToothInfo.next.toothId}
                             </span>
@@ -1304,19 +1329,19 @@ export default function PatientsPage() {
                                 {nextToothInfo.isDueToday ? (
                                   <span className="text-red-600 dark:text-red-400 font-extrabold flex items-center gap-1">
                                     <span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-ping inline-block" />
-                                    🔥 DUE TODAY {nextToothInfo.next.targetTime ? `at ${nextToothInfo.next.targetTime}` : ''}
+                                    <Flame className="w-3 h-3 inline" /> DUE TODAY {nextToothInfo.next.targetTime ? `at ${nextToothInfo.next.targetTime}` : ''}
                                   </span>
                                 ) : nextToothInfo.isOverdue ? (
                                   <span className="text-red-600 dark:text-red-400 font-bold">
-                                    ⚠️ {Math.abs(nextToothInfo.daysRemaining!)}d Overdue ({nextToothInfo.next.targetDate})
+                                    {Math.abs(nextToothInfo.daysRemaining!)}d Overdue ({nextToothInfo.next.targetDate})
                                   </span>
                                 ) : nextToothInfo.daysRemaining === 1 ? (
-                                  <span className="text-amber-700 dark:text-amber-300 font-bold">
-                                    ⚡ Tomorrow at {nextToothInfo.next.targetTime || '10:00'}
+                                  <span className="text-indigo-600 dark:text-indigo-400 font-bold">
+                                    <Calendar className="w-3 h-3 inline mr-0.5" /> Tomorrow at {nextToothInfo.next.targetTime || '10:00'}
                                   </span>
                                 ) : (
-                                  <span className="text-indigo-600 dark:text-indigo-400 font-medium">
-                                    ⏰ In {nextToothInfo.daysRemaining} days ({nextToothInfo.next.targetDate})
+                                  <span className="text-slate-600 dark:text-slate-400 font-medium">
+                                    <Clock className="w-3 h-3 inline mr-0.5" /> In {nextToothInfo.daysRemaining} days ({nextToothInfo.next.targetDate})
                                   </span>
                                 )}
                               </div>
@@ -1330,7 +1355,7 @@ export default function PatientsPage() {
                               setSchedulerInitialToothId(nextToothInfo.next!.toothId);
                               setShowSchedulerModal(true);
                             }}
-                            className="text-[10px] font-bold text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-amber-200 px-2 py-1 rounded-md bg-white/80 dark:bg-gray-800/80 border border-amber-200 dark:border-amber-700/60 shadow-xs shrink-0 cursor-pointer"
+                            className="text-[10px] font-bold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 px-2 py-1 rounded-md bg-white/80 dark:bg-gray-800/80 border border-slate-200 dark:border-slate-700/60 shadow-xs shrink-0 cursor-pointer"
                           >
                             Edit
                           </button>
@@ -1339,16 +1364,7 @@ export default function PatientsPage() {
 
                       {/* Quick Actions Row */}
                       {!isStaffAuth && (
-                        <div className="mt-3 flex items-center gap-1.5 pt-2.5 border-t border-gray-100 dark:border-gray-700/60 relative">
-                          {isPerformingQuickAction === patient.id && (
-                            <div className="absolute inset-0 bg-white/60 dark:bg-gray-800/60 z-10 flex items-center justify-center rounded-lg">
-                              <svg className="animate-spin h-4 w-4 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                              </svg>
-                            </div>
-                          )}
-                          
+                        <div className="mt-3 flex items-center gap-1.5 pt-2.5 border-t border-gray-100 dark:border-gray-700/60">
                           {/* Direct Schedule Tooth button */}
                           <button
                             type="button"
@@ -1358,69 +1374,10 @@ export default function PatientsPage() {
                               setSchedulerInitialToothId(undefined);
                               setShowSchedulerModal(true);
                             }}
-                            className="px-2.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg text-[10px] font-bold uppercase tracking-tight transition-all shadow-xs flex items-center gap-1 cursor-pointer shrink-0"
+                            className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold uppercase tracking-tight transition-colors shadow-xs flex items-center gap-1 cursor-pointer shrink-0"
                             title="Schedule Procedure for a Tooth"
                           >
-                            <span>⚡</span> Tooth
-                          </button>
-
-                          {/* Visit Selector Dropdown */}
-                          <div className="relative">
-                            <select
-                              value={selectedVisitIdMap[patient.id] || (patientVisitsMap[patient.id]?.[0]?.id || '')}
-                              onChange={(e) => {
-                                e.stopPropagation();
-                                setSelectedVisitIdMap(prev => ({ ...prev, [patient.id]: e.target.value }));
-                              }}
-                              onClick={(e) => e.stopPropagation()}
-                              className="appearance-none text-[10px] font-bold bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg px-2 py-1.5 pr-5 focus:ring-2 focus:ring-indigo-500 text-gray-700 dark:text-gray-300 cursor-pointer hover:border-indigo-300 transition-colors"
-                            >
-                              {(patientVisitsMap[patient.id] || []).map((v, i, arr) => (
-                                <option key={v.id} value={v.id}>
-                                  V{arr.length - i}
-                                </option>
-                              ))}
-                              {(patientVisitsMap[patient.id] || []).length === 0 && (
-                                <option value="">No Visit</option>
-                              )}
-                            </select>
-                            <div className="absolute inset-y-0 right-0 flex items-center px-1 pointer-events-none text-gray-400">
-                              <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
-                            </div>
-                          </div>
-
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleQuickAction(patient, 'exam');
-                            }}
-                            disabled={isPerformingQuickAction === patient.id}
-                            className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-lg text-[10px] font-bold uppercase tracking-tight hover:bg-blue-100 dark:hover:bg-blue-900/40 transition-colors border border-blue-100 dark:border-blue-900/30 cursor-pointer"
-                            title="Quick Examination"
-                          >
-                            Exam
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleQuickAction(patient, 'prescription');
-                            }}
-                            disabled={isPerformingQuickAction === patient.id}
-                            className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 rounded-lg text-[10px] font-bold uppercase tracking-tight hover:bg-green-100 dark:hover:bg-green-900/40 transition-colors border border-green-100 dark:border-green-900/30 cursor-pointer"
-                            title="Quick Prescription"
-                          >
-                            Rx
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleQuickAction(patient, 'investigation');
-                            }}
-                            disabled={isPerformingQuickAction === patient.id}
-                            className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-purple-50 dark:bg-purple-900/20 text-purple-700 dark:text-purple-300 rounded-lg text-[10px] font-bold uppercase tracking-tight hover:bg-purple-100 dark:hover:bg-purple-900/40 transition-colors border border-purple-100 dark:border-purple-900/30 cursor-pointer"
-                            title="Quick Investigation Upload"
-                          >
-                            Labs
+                            <Calendar className="w-3 h-3" /> Schedule Tooth
                           </button>
                         </div>
                       )}
@@ -1468,7 +1425,7 @@ export default function PatientsPage() {
                       {/* Prominent First Visit Admission Card & Quick Tooth Schedule */}
                       <div className="mt-3 flex items-center gap-3 flex-wrap">
                         <div className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/60 dark:to-blue-950/60 border border-indigo-200 dark:border-indigo-800/80 px-3.5 py-1.5 rounded-xl shadow-xs">
-                          <span className="text-sm">📅</span>
+                           <Calendar className="w-4 h-4 text-indigo-500" />
                           <div>
                             <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 block leading-tight">
                               First Visit / Admission Date
@@ -1485,9 +1442,9 @@ export default function PatientsPage() {
                             setSchedulerPatient(selectedPatient);
                             setShowSchedulerModal(true);
                           }}
-                          className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 transition-all hover:scale-105 cursor-pointer"
+                          className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
                         >
-                          <span>⚡</span> Schedule Tooth Procedure
+                          <Calendar className="w-3.5 h-3.5" /> Schedule Tooth Procedure
                         </button>
                       </div>
                     </div>
@@ -1502,15 +1459,6 @@ export default function PatientsPage() {
                         </svg>
                       </button>
 
-                      <button
-                        onClick={() => setShowPdfModal(true)}
-                        className="p-2 text-green-600 hover:bg-green-100 rounded-md transition duration-150"
-                        title="Generate PDF Report"
-                      >
-                        <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                      </button>
 
                       <button
                         onClick={() => handleDeletePatient(selectedPatient.id)}
@@ -1560,47 +1508,53 @@ export default function PatientsPage() {
                       </div>
                     </div>
 
-                    {/* Payment Breakdown Card */}
-                    {(selectedPatient.totalCost || selectedPatient.amountPaid || selectedPatient.remainingBalance) && (
-                      <div className="bg-gradient-to-br from-emerald-50 to-teal-50/50 dark:from-emerald-950/20 dark:to-teal-950/10 border border-emerald-200 dark:border-emerald-800/60 p-4 rounded-lg">
-                        <h3 className="text-sm font-bold text-emerald-800 dark:text-emerald-300 mb-3 flex items-center gap-2">
-                          <span>💰</span> Payment Breakdown
+                    {/* Financial & Payment Overview Card — Multi-visit Aggregate */}
+                    {selectedPatientFinancials.visitsCount > 0 && (
+                      <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 p-4 rounded-xl">
+                        <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-3 flex items-center gap-2">
+                          <TrendingUp className="w-4 h-4" />
+                          Financial Overview
+                          <span className="ml-auto text-[10px] font-normal text-slate-400">{selectedPatientFinancials.visitsCount} visit{selectedPatientFinancials.visitsCount !== 1 ? 's' : ''} total</span>
                         </h3>
-                        <div className="space-y-2">
-                          {selectedPatient.totalCost && Number(selectedPatient.totalCost) > 0 && (
-                            <div className="flex justify-between items-center">
-                              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Total Cost</span>
-                              <span className="text-sm font-bold text-gray-900 dark:text-white font-mono">${Number(selectedPatient.totalCost).toLocaleString()}</span>
-                            </div>
-                          )}
-                          {selectedPatient.amountPaid && Number(selectedPatient.amountPaid) >= 0 && (
-                            <div className="flex justify-between items-center">
-                              <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Amount Paid</span>
-                              <span className="text-sm font-bold text-emerald-700 dark:text-emerald-300 font-mono">${Number(selectedPatient.amountPaid).toLocaleString()}</span>
-                            </div>
-                          )}
-                          {selectedPatient.remainingBalance !== undefined && (
-                            <div className="flex justify-between items-center pt-2 border-t border-emerald-200 dark:border-emerald-800/40">
-                              <span className="text-xs font-bold text-gray-600 dark:text-gray-300">Balance Due</span>
-                              <span className={`text-sm font-extrabold font-mono px-2 py-0.5 rounded ${
-                                Number(selectedPatient.remainingBalance) > 0
-                                  ? 'text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-900/40 border border-red-200 dark:border-red-700'
-                                  : 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-900/30'
-                              }`}>
-                                {Number(selectedPatient.remainingBalance) > 0 ? `⚠️ $${Number(selectedPatient.remainingBalance).toLocaleString()} DUE` : '✅ Fully Paid'}
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="flex flex-col items-center p-2.5 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                            <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Total Paid</span>
+                            <span className="text-sm font-extrabold text-slate-800 dark:text-slate-200 font-mono">${selectedPatientFinancials.totalSpent.toLocaleString()}</span>
+                          </div>
+                          <div className="flex flex-col items-center p-2.5 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
+                            <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Total Invoiced</span>
+                            <span className="text-sm font-extrabold text-slate-800 dark:text-slate-200 font-mono">${selectedPatientFinancials.totalInvoiced.toLocaleString()}</span>
+                          </div>
+                          <div className={`flex flex-col items-center p-2.5 rounded-lg border ${
+                            selectedPatientFinancials.totalDue > 0
+                              ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800/60'
+                              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                          }`}>
+                            <span className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${selectedPatientFinancials.totalDue > 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'}`}>Balance Due</span>
+                            {selectedPatientFinancials.totalDue > 0 ? (
+                              <span className="text-sm font-extrabold text-red-700 dark:text-red-300 font-mono">${selectedPatientFinancials.totalDue.toLocaleString()}</span>
+                            ) : (
+                              <span className="flex items-center gap-1 text-sm font-extrabold text-slate-600 dark:text-slate-300">
+                                <CheckCircle2 className="w-3.5 h-3.5" /> Paid
                               </span>
-                            </div>
-                          )}
+                            )}
+                          </div>
                         </div>
+                        {selectedPatientFinancials.totalDue > 0 && (
+                          <div className="mt-2.5 flex items-center gap-2 p-2 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800/40">
+                            <AlertCircle className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" />
+                            <span className="text-[11px] font-bold text-red-700 dark:text-red-300">Outstanding balance across all visits: <span className="font-mono">${selectedPatientFinancials.totalDue.toLocaleString()} USD</span></span>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>
 
                   {/* Scheduled Tooth Procedures Management */}
-                  <div className="mb-6 p-4 rounded-2xl bg-gradient-to-br from-indigo-50/70 to-blue-50/40 dark:from-indigo-950/30 dark:to-blue-950/20 border border-indigo-100 dark:border-indigo-800/50 shadow-xs">
+                  <div className="mb-6 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/30 border border-slate-200 dark:border-slate-700/50">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2 uppercase tracking-wider">
-                        <span>⏰</span>
+                        <Clock className="w-4 h-4" />
                         <span>Scheduled Tooth Procedures ({selectedPatientSchedules.length})</span>
                       </h3>
                       <button
@@ -1610,9 +1564,9 @@ export default function PatientsPage() {
                           setSchedulerInitialToothId(undefined);
                           setShowSchedulerModal(true);
                         }}
-                        className="text-xs font-bold px-3 py-1.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white rounded-lg shadow-sm flex items-center gap-1.5 transition-all hover:scale-105 cursor-pointer"
+                        className="text-xs font-bold px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
                       >
-                        <span>⚡</span> + Schedule Tooth
+                        <Calendar className="w-3.5 h-3.5" /> + Schedule Tooth
                       </button>
                     </div>
 
@@ -1632,7 +1586,7 @@ export default function PatientsPage() {
                                   {sch.procedure} {sch.palmer ? `(${sch.palmer})` : ''}
                                 </div>
                                 <div className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold">
-                                  📅 {sch.targetDate} {sch.targetTime ? `at ${sch.targetTime}` : ''}
+                                  {sch.targetDate} {sch.targetTime ? `at ${sch.targetTime}` : ''}
                                 </div>
                               </div>
                             </div>
@@ -1653,7 +1607,7 @@ export default function PatientsPage() {
                   <div className="mb-8">
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <span className="text-lg">🦷</span> Dentition Chart
+                        <ToothIcon className="w-5 h-5 text-indigo-500" /> Dentition Chart
                       </h3>
                       {!isStaffAuth && (
                         <button
@@ -1692,17 +1646,50 @@ export default function PatientsPage() {
 
                   {/* Visit History Section */}
                   <div className="mt-8 pt-8 border-t border-gray-100 dark:border-gray-700">
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center justify-between mb-3">
                       <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center">
-                        <svg className="h-5 w-5 mr-2 text-indigo-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
+                        <Clock className="h-5 w-5 mr-2 text-indigo-500" />
                         Visit History
                         <span className="ml-2 px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 text-xs rounded-full font-normal">
                           {patientVisits.length} visits
                         </span>
                       </h3>
                     </div>
+
+                    {/* Aggregate Financial Summary Bar */}
+                    {selectedPatientFinancials.visitsCount > 1 && (
+                      <div className="mb-4 flex flex-wrap gap-2 p-3 rounded-xl bg-gradient-to-r from-slate-50 to-gray-50 dark:from-slate-900/40 dark:to-gray-900/30 border border-gray-200 dark:border-gray-700">
+                        <div className="flex items-center gap-1.5 text-xs">
+                          <DollarSign className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                          <span className="text-gray-500 dark:text-gray-400">Total Paid:</span>
+                          <span className="font-bold text-emerald-700 dark:text-emerald-300 font-mono">${selectedPatientFinancials.totalSpent.toLocaleString()}</span>
+                        </div>
+                        <span className="text-gray-300 dark:text-gray-600">·</span>
+                        <div className="flex items-center gap-1.5 text-xs">
+                          <CreditCard className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
+                          <span className="text-gray-500 dark:text-gray-400">Invoiced:</span>
+                          <span className="font-bold text-blue-700 dark:text-blue-300 font-mono">${selectedPatientFinancials.totalInvoiced.toLocaleString()}</span>
+                        </div>
+                        {selectedPatientFinancials.totalDue > 0 && (
+                          <>
+                            <span className="text-gray-300 dark:text-gray-600">·</span>
+                            <div className="flex items-center gap-1.5 text-xs">
+                              <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
+                              <span className="text-red-600 dark:text-red-400 font-bold">Balance Due: <span className="font-mono">${selectedPatientFinancials.totalDue.toLocaleString()}</span></span>
+                            </div>
+                          </>
+                        )}
+                        {selectedPatientFinancials.totalDue === 0 && selectedPatientFinancials.totalInvoiced > 0 && (
+                          <>
+                            <span className="text-gray-300 dark:text-gray-600">·</span>
+                            <div className="flex items-center gap-1.5 text-xs">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
+                              <span className="text-emerald-600 dark:text-emerald-400 font-bold">Fully Settled</span>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )}
 
                     {isLoadingVisits ? (
                       <div className="flex justify-center py-8">
@@ -1848,7 +1835,11 @@ export default function PatientsPage() {
                                             <div className="flex flex-col">
                                               <span className="text-[9px] font-bold uppercase text-gray-500">Balance</span>
                                               <span className={`text-sm font-extrabold font-mono ${Number(td.remainingBalance) > 0 ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
-                                                {Number(td.remainingBalance) > 0 ? `⚠️ $${Number(td.remainingBalance).toLocaleString()} DUE` : '✅ Paid'}
+                                                {Number(td.remainingBalance) > 0 ? (
+                                                  <span className="flex items-center gap-1"><AlertTriangle className="w-3 h-3" />${Number(td.remainingBalance).toLocaleString()} DUE</span>
+                                                ) : (
+                                                  <span className="flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Paid</span>
+                                                )}
                                               </span>
                                             </div>
                                           )}
@@ -1997,12 +1988,12 @@ export default function PatientsPage() {
                 ))}
 
                 {/* Payment Suite (USD) — 3 fields */}
-                <div className="md:col-span-2 bg-emerald-50/60 dark:bg-emerald-950/20 p-3.5 rounded-xl border border-emerald-200 dark:border-emerald-800/40 space-y-3">
+                <div className="md:col-span-2 bg-gray-50 dark:bg-gray-800/50 p-3.5 rounded-xl border border-gray-200 dark:border-gray-700 space-y-3">
                   <div className="flex items-center justify-between">
-                    <label className="block text-xs font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-tighter flex items-center justify-between">
-                      <span>Payment / USD</span>
+                    <label className="block text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider">
+                      Payment / USD
                     </label>
-                    <span className="text-[10px] bg-emerald-100 dark:bg-emerald-900/50 px-2 py-0.5 rounded text-emerald-800 dark:text-emerald-200 font-bold">USD Only</span>
+                    <span className="text-[10px] bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded text-gray-600 dark:text-gray-300 font-semibold">USD Only</span>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
@@ -2013,7 +2004,7 @@ export default function PatientsPage() {
                         </div>
                         <input
                           type="text" inputMode="decimal"
-                          className="w-full pl-7 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono font-bold focus:ring-2 focus:ring-emerald-500"
+                          className="w-full pl-7 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono font-semibold focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500"
                           value={(editVisitForm as any).totalCost !== undefined ? String((editVisitForm as any).totalCost) : ''}
                           onChange={(e) => {
                             const s = e.target.value.replace(/[^0-9.]/g, '');
@@ -2033,11 +2024,11 @@ export default function PatientsPage() {
                       <label className="block text-[10px] font-semibold text-gray-500 dark:text-gray-400 mb-1">Amount Paid Now</label>
                       <div className="relative rounded-lg shadow-sm">
                         <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                          <span className="text-emerald-600 font-bold text-sm">$</span>
+                          <span className="text-gray-500 font-bold text-sm">$</span>
                         </div>
                         <input
                           type="text" inputMode="decimal"
-                          className="w-full pl-7 pr-3 py-2 border border-emerald-300 dark:border-emerald-700 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono font-bold focus:ring-2 focus:ring-emerald-500"
+                          className="w-full pl-7 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono font-semibold focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500"
                           value={editVisitForm.amount_paid !== undefined ? String(editVisitForm.amount_paid) : ''}
                           onChange={(e) => {
                             const sanitized = e.target.value.replace(/[^0-9.]/g, '');
@@ -2060,13 +2051,17 @@ export default function PatientsPage() {
                     <div className={`flex items-center justify-between px-3 py-2 rounded-lg border ${
                       Number((editVisitForm as any).remainingBalance) > 0
                         ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
-                        : 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40'
+                        : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
                     }`}>
                       <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Balance Remaining</span>
                       <span className={`text-sm font-extrabold font-mono ${
-                        Number((editVisitForm as any).remainingBalance) > 0 ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'
+                        Number((editVisitForm as any).remainingBalance) > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-800 dark:text-gray-200'
                       }`}>
-                        {Number((editVisitForm as any).remainingBalance) > 0 ? `⚠️ $${Number((editVisitForm as any).remainingBalance).toLocaleString()} DUE` : '✅ Fully Paid'}
+                        {Number((editVisitForm as any).remainingBalance) > 0 ? (
+                          <span className="flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />${Number((editVisitForm as any).remainingBalance).toLocaleString()} DUE</span>
+                        ) : (
+                          <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />Fully Paid</span>
+                        )}
                       </span>
                     </div>
                   )}

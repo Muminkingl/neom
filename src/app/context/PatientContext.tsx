@@ -722,7 +722,7 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
               examination: sanitizedData.examination || '',
               follow_up_date: sanitizedData.followUpDate || '',
               note: sanitizedData.note || '',
-              table_data: sanitizedData.tableData || '',
+              table_data: finalTableData,
               amount_paid: Number(sanitizedData.amountPaid) || 0,
               user_id: userId
             };
