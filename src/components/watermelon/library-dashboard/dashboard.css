@@ -1,0 +1,116 @@
+.library-dashboard,
+body:has(.library-dashboard) [data-mobile='true'][data-sidebar='sidebar'],
+body:has(.library-dashboard) [data-slot='dropdown-menu-content'],
+body:has(.library-dashboard) [data-slot='sheet-content'],
+body:has(.library-dashboard) [data-slot='tooltip-content'] {
+  --background: #ffffff;
+  --foreground: #0f172a;
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+  --primary: #008294;
+  --primary-foreground: #ffffff;
+  --secondary: #f8fafc;
+  --secondary-foreground: #1e293b;
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --accent: #e6f4f6;
+  --accent-foreground: #008294;
+  --destructive: #ef4444;
+  --border: #e2e8f0;
+  --input: #f8fafc;
+  --ring: #008294;
+  --chart-1: #008294;
+  --chart-2: #0e7490;
+  --chart-3: #14b8a6;
+  --chart-4: #64748b;
+  --chart-5: #0f172a;
+  --radius: 0.625rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0f172a;
+  --sidebar-primary: #008294;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #e6f4f6;
+  --sidebar-accent-foreground: #008294;
+  --sidebar-border: #e2e8f0;
+  --sidebar-ring: #008294;
+  --input-placeholder: #94a3b8;
+  background-color: var(--background);
+  color: var(--foreground);
+}
+
+.library-dashboard.dark,
+.dark .library-dashboard,
+.dark body:has(.library-dashboard) [data-mobile='true'][data-sidebar='sidebar'],
+.dark body:has(.library-dashboard) [data-slot='dropdown-menu-content'],
+.dark body:has(.library-dashboard) [data-slot='sheet-content'],
+.dark body:has(.library-dashboard) [data-slot='tooltip-content'] {
+  --background: #0b1120;
+  --foreground: #f8fafc;
+  --card: #0f172a;
+  --card-foreground: #f8fafc;
+  --popover: #0f172a;
+  --popover-foreground: #f8fafc;
+  --primary: #009cb3;
+  --primary-foreground: #ffffff;
+  --secondary: #1e293b;
+  --secondary-foreground: #f8fafc;
+  --muted: #1e293b;
+  --muted-foreground: #94a3b8;
+  --accent: #132d36;
+  --accent-foreground: #38bdf8;
+  --destructive: #ef4444;
+  --border: #1e293b;
+  --input: #1e293b;
+  --ring: #009cb3;
+  --sidebar: #0f172a;
+  --sidebar-foreground: #f8fafc;
+  --sidebar-primary: #009cb3;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #132d36;
+  --sidebar-accent-foreground: #38bdf8;
+  --sidebar-border: #1e293b;
+  --sidebar-ring: #009cb3;
+  --input-placeholder: #64748b;
+}
+
+body:has(.library-dashboard) [data-slot='tooltip-content'] {
+  background-color: var(--foreground) !important;
+  color: var(--background) !important;
+}
+
+body:has(.library-dashboard) [data-slot='tooltip-content'] > svg {
+  background-color: var(--foreground) !important;
+  fill: var(--foreground) !important;
+}
+
+.library-dashboard .bg-input {
+  background-color: var(--input);
+}
+
+.library-dashboard input::placeholder,
+.library-dashboard textarea::placeholder {
+  color: var(--input-placeholder);
+}
+
+.library-dashboard * {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.library-dashboard *::-webkit-scrollbar {
+  display: none;
+}
+
+/* custom classes */
+.no-scrollbar,
+.no-scrollbar * {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.no-scrollbar::-webkit-scrollbar,
+.no-scrollbar *::-webkit-scrollbar {
+  display: none;
+}

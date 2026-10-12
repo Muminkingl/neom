@@ -1,30 +1,51 @@
 "use client";
 
-import { useState, useEffect, useMemo } from 'react';
-import { usePatients, Patient, Visit, ToothSchedule, extractToothSchedulesFromTableData } from '../../context/PatientContext';
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import React, { useState, useEffect, useMemo, Suspense } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
+import {
+  usePatients,
+  Patient,
+  Visit,
+  ToothSchedule,
+  extractToothSchedulesFromTableData,
+} from '../../context/PatientContext';
+import { useAuth } from '../../context/AuthContext';
 import PatientEditForm from '../../components/PatientEditForm';
 import InvestigationModal from '../../components/InvestigationModal';
-import DentitionChart from '../../components/DentitionChart';
 import ToothSchedulerModal from '../../components/ToothSchedulerModal';
-import { Badge } from '../../components/ui/badge';
-import { exportToExcel } from '@/lib/excelExport';
 import { generatePatientPDF } from '@/lib/pdfGenerator';
+import { exportToExcel } from '@/lib/excelExport';
 import { supabase } from '@/lib/supabase';
-import { useAuth } from '../../context/AuthContext';
-import ToothIcon from '../../components/ToothIcon';
-import {
-  Users, Flame, Calendar, Zap, Clock, AlertTriangle, CheckCircle2,
-  DollarSign, CreditCard, AlertCircle, TrendingUp, FolderKanban,
-  Pencil
-} from 'lucide-react';
 
-export default function PatientsPage() {
-  const { patients, deletePatient, editPatient, isLoading, error, refreshPatients, getPatientVisits, editVisit, deleteVisit } = usePatients();
-  const { isStaffAuth, isReceptionAuth, isAuthenticated } = useAuth();
+// High-fidelity Clean Components matching user screenshot
+import DentalChartCard from './components/DentalChartCard';
+import DentalRecordsCard, { DentalRecordItem } from './components/DentalRecordsCard';
+import PatientNavTabs, { PatientTab } from './components/PatientNavTabs';
+import PatientHeader from './components/PatientHeader';
+import DentalRecordModal from './components/DentalRecordModal';
+import PatientProfileTab from './components/PatientProfileTab';
+import PatientMedicalTab from './components/PatientMedicalTab';
+import PatientAppointmentsTab from './components/PatientAppointmentsTab';
+import PatientInvoicesTab from './components/PatientInvoicesTab';
+import PatientDocumentsTab from './components/PatientDocumentsTab';
+import PatientNotesTab from './components/PatientNotesTab';
+import PatientDirectoryView from './components/PatientDirectoryView';
+import { ToothRecord } from '@/app/components/DentitionChart';
+
+function PatientsContent() {
+  const {
+    patients,
+    deletePatient,
+    editPatient,
+    isLoading,
+    refreshPatients,
+    getPatientVisits,
+  } = usePatients();
+  const { isStaffAuth, isReceptionAuth } = useAuth();
   const router = useRouter();
-  
+  const searchParams = useSearchParams();
+
+  // Redirect reception/staff appropriately
   useEffect(() => {
     if (isReceptionAuth) {
       router.push('/dashboard');
@@ -33,2293 +54,464 @@ export default function PatientsPage() {
     }
   }, [isReceptionAuth, isStaffAuth, router]);
 
-  const [searchTerm, setSearchTerm] = useState('');
-  const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
-  const [isDeleting, setIsDeleting] = useState<string | null>(null);
-  const [isEditing, setIsEditing] = useState(false);
-  const [isExporting, setIsExporting] = useState(false);
-  const [showMobileDetails, setShowMobileDetails] = useState(false);
-  const [ageFilter, setAgeFilter] = useState<string>('all');
-  const [isFilterOpen, setIsFilterOpen] = useState(false);
-  const [customMinAge, setCustomMinAge] = useState<string>('');
-  const [customMaxAge, setCustomMaxAge] = useState<string>('');
-  const [showCustomAgeInputs, setShowCustomAgeInputs] = useState(false);
-  const [activeFilter, setActiveFilter] = useState<string>('all');
-  const [patientVisits, setPatientVisits] = useState<Visit[]>([]);
-  const [isLoadingVisits, setIsLoadingVisits] = useState(false);
-  const [dateFilter, setDateFilter] = useState<string>('today'); // today, yesterday, all, custom
-  const [customDateFilterValue, setCustomDateFilterValue] = useState<string>('');
-  const [isDeletingVisit, setIsDeletingVisit] = useState<string | null>(null);
+  // Selected Patient State
+  const [selectedPatientId, setSelectedPatientId] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<PatientTab>('dental');
+  const [showDirectory, setShowDirectory] = useState(false);
 
-  // Clinical Tooth Scheduling & Inbox States
-  const [scheduleFilter, setScheduleFilter] = useState<'all' | 'due_today' | 'next_7_days' | 'has_schedule'>('all');
+  // Modals & Forms
+  const [isEditingPatient, setIsEditingPatient] = useState(false);
+  const [showInvestigationModal, setShowInvestigationModal] = useState(false);
   const [showSchedulerModal, setShowSchedulerModal] = useState(false);
-  const [schedulerPatient, setSchedulerPatient] = useState<Patient | null>(null);
   const [schedulerInitialToothId, setSchedulerInitialToothId] = useState<string | undefined>(undefined);
 
-  // Helper to extract upcoming/next scheduled tooth procedure for any patient
-  const getPatientNextToothSchedule = (patient: Patient): {
-    next: ToothSchedule | null;
-    isDueToday: boolean;
-    isOverdue: boolean;
-    daysRemaining: number | null;
-  } => {
-    const schedules = extractToothSchedulesFromTableData(patient.tableData);
-    if (!schedules || schedules.length === 0) {
-      return { next: null, isDueToday: false, isOverdue: false, daysRemaining: null };
+  // Dental Record Modal
+  const [recordModalOpen, setRecordModalOpen] = useState(false);
+  const [editingRecord, setEditingRecord] = useState<DentalRecordItem | null>(null);
+
+  // Visits State
+  const [patientVisits, setPatientVisits] = useState<Visit[]>([]);
+  const [isLoadingVisits, setIsLoadingVisits] = useState(false);
+
+  // Sync with URL query parameter ?id=... or default to first patient
+  useEffect(() => {
+    const queryId = searchParams.get('id');
+    if (queryId && patients.some((p) => p.id === queryId)) {
+      setSelectedPatientId(queryId);
+      setShowDirectory(false);
+    } else if (!selectedPatientId && patients.length > 0) {
+      setSelectedPatientId(patients[0].id);
     }
-    const active = schedules.filter(s => s.status !== 'Completed' && s.status !== 'Cancelled');
-    if (active.length === 0) {
-      return { next: null, isDueToday: false, isOverdue: false, daysRemaining: null };
+  }, [searchParams, patients, selectedPatientId]);
+
+  // Active patient object
+  const selectedPatient = useMemo(
+    () => patients.find((p) => p.id === selectedPatientId) || null,
+    [patients, selectedPatientId]
+  );
+
+  // Fetch visits whenever selected patient changes
+  useEffect(() => {
+    if (selectedPatient?.id) {
+      setIsLoadingVisits(true);
+      getPatientVisits(selectedPatient.id)
+        .then((v) => setPatientVisits(v || []))
+        .catch(() => setPatientVisits([]))
+        .finally(() => setIsLoadingVisits(false));
+    } else {
+      setPatientVisits([]);
     }
-    active.sort((a, b) => new Date(a.targetDate).getTime() - new Date(b.targetDate).getTime());
-    const next = active[0];
+  }, [selectedPatient?.id, getPatientVisits]);
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const target = new Date(next.targetDate);
-    target.setHours(0, 0, 0, 0);
+  // Parse patient's dentition chart data
+  const { chartData, teethData, dentalRecords } = useMemo(() => {
+    if (!selectedPatient?.tableData) {
+      return { chartData: null, teethData: {}, dentalRecords: [] };
+    }
+    try {
+      const parsed = JSON.parse(selectedPatient.tableData);
+      const teeth = parsed?.teeth || {};
+      const records: DentalRecordItem[] = Object.entries(teeth)
+        .filter(([, data]: any) => data && data.condition && data.condition !== 'sound')
+        .map(([toothId, data]: any) => ({
+          toothId,
+          condition: data.condition,
+          surfaces: data.surfaces || [],
+          treatment: data.treatment || data.procedure || '',
+          price: data.price || undefined,
+          status: data.status || 'In Progress',
+          notes: data.notes || '',
+        }));
 
-    const diffDays = Math.round((target.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    const isDueToday = diffDays === 0;
-    const isOverdue = diffDays < 0;
+      return { chartData: parsed, teethData: teeth, dentalRecords: records };
+    } catch {
+      return { chartData: null, teethData: {}, dentalRecords: [] };
+    }
+  }, [selectedPatient?.tableData]);
 
-    return { next, isDueToday, isOverdue, daysRemaining: diffDays };
-  };
-
-  // Computations for Clinical Inbox tabs
-  const { dueTodayCount, next7DaysCount, hasScheduleCount } = useMemo(() => {
-    let dueToday = 0;
-    let next7Days = 0;
-    let hasSchedule = 0;
-
-    patients.forEach(p => {
-      const info = getPatientNextToothSchedule(p);
-      if (info.next) {
-        hasSchedule++;
-        if (info.isDueToday || info.isOverdue) {
-          dueToday++;
-        } else if (info.daysRemaining !== null && info.daysRemaining >= 0 && info.daysRemaining <= 7) {
-          next7Days++;
-        }
-      }
-    });
-
-    return { dueTodayCount: dueToday, next7DaysCount: next7Days, hasScheduleCount: hasSchedule };
-  }, [patients]);
-
-  const selectedPatientSchedules = useMemo(() => {
+  // Extract scheduled procedures
+  const toothSchedules = useMemo(() => {
     if (!selectedPatient) return [];
     return extractToothSchedulesFromTableData(selectedPatient.tableData);
-  }, [selectedPatient, selectedPatient?.tableData]);
+  }, [selectedPatient]);
 
-  // Multi-visit aggregate financials for the selected patient
-  const selectedPatientFinancials = useMemo(() => {
-    if (!patientVisits || patientVisits.length === 0) {
-      return { totalSpent: 0, totalDue: 0, totalInvoiced: 0, visitsCount: 0 };
-    }
-    let totalSpent = 0;
-    let totalDue = 0;
-    let totalInvoiced = 0;
-    for (const v of patientVisits) {
-      const paid = Number(v.amount_paid || 0);
-      totalSpent += paid;
-      let td: any = {};
-      try { td = v.table_data ? JSON.parse(v.table_data) : {}; } catch {}
-      const cost = Number(td.totalCost || 0);
-      const rem = Number(td.remainingBalance || 0);
-      totalInvoiced += cost;
-      totalDue += rem;
-    }
-    return { totalSpent, totalDue, totalInvoiced, visitsCount: patientVisits.length };
-  }, [patientVisits]);
-
-  useEffect(() => {
-    setCustomDateFilterValue(new Date().toISOString().split('T')[0]);
-  }, []);
-
-  // Visit selector modals
-  const [showPdfModal, setShowPdfModal] = useState(false);
-  const [showEditVisitModal, setShowEditVisitModal] = useState(false);
-  const [editingVisit, setEditingVisit] = useState<Visit | null>(null);
-  const [editVisitForm, setEditVisitForm] = useState<Partial<Visit>>({});
-  const [isSavingVisit, setIsSavingVisit] = useState(false);
-  
-  // Print options modal
-  const [showPrintOptionsModal, setShowPrintOptionsModal] = useState(false);
-  const [printingVisit, setPrintingVisit] = useState<Visit | null>(null);
-
-  // Quick Actions states
-  const [showQuickExamModal, setShowQuickExamModal] = useState(false);
-  const [showQuickPrescriptionModal, setShowQuickPrescriptionModal] = useState(false);
-  const [showQuickInvestigationModal, setShowQuickInvestigationModal] = useState(false);
-  const [quickActionVisit, setQuickActionVisit] = useState<Visit | null>(null);
-  const [quickActionPatient, setQuickActionPatient] = useState<Patient | null>(null);
-  const [isPerformingQuickAction, setIsPerformingQuickAction] = useState<string | null>(null); // patientId
-  const [patientVisitsMap, setPatientVisitsMap] = useState<Record<string, Visit[]>>({});
-  const [selectedVisitIdMap, setSelectedVisitIdMap] = useState<Record<string, string>>({});
-
-  // Fetch all visit summaries for the dropdowns
-  const fetchAllVisitSummaries = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('visits')
-        .select('id, patient_id, visited_at')
-        .order('visited_at', { ascending: false });
-
-      if (error) throw error;
-
-      const map: Record<string, Visit[]> = {};
-      data?.forEach((v: any) => {
-        if (!map[v.patient_id]) map[v.patient_id] = [];
-        map[v.patient_id].push(v as Visit);
-      });
-      setPatientVisitsMap(map);
-    } catch (err) {
-      console.error('Error fetching visit summaries:', err);
-    }
-  };
-
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchAllVisitSummaries();
-    }
-  }, [isAuthenticated, patients]);
-
-
-  // Format date for display
-  const formatDate = (dateString: string) => {
-    const options: Intl.DateTimeFormatOptions = {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
+  // Save changes to patient's tableData
+  const handleSaveTeethData = async (updatedTeeth: typeof teethData) => {
+    if (!selectedPatient) return;
+    const newChartData = {
+      type: 'dentition_chart',
+      version: 5,
+      lastUpdated: new Date().toISOString(),
+      patientAge: selectedPatient.dob,
+      teeth: updatedTeeth,
+      scheduledProcedures: chartData?.scheduledProcedures || [],
     };
-    return new Date(dateString).toLocaleDateString(undefined, options);
+    const jsonStr = JSON.stringify(newChartData);
+    await editPatient(selectedPatient.id, { tableData: jsonStr });
   };
 
-  // Convert ISO timestamp string to local YYYY-MM-DD format
-  const getLocalDateString = (isoString: string): string => {
-    if (!isoString) return '';
-    const date = new Date(isoString);
-    if (isNaN(date.getTime())) return '';
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
+  // Save/Update a single dental record
+  const handleSaveRecord = async (record: DentalRecordItem) => {
+    const updated = {
+      ...teethData,
+      [record.toothId]: {
+        condition: record.condition,
+        surfaces: record.surfaces,
+        treatment: record.treatment,
+        price: record.price,
+        status: record.status,
+        notes: record.notes,
+      },
+    };
+    await handleSaveTeethData(updated);
   };
 
-  // Calculate age from DOB
-  const calculateAge = (dob: string): number | string => {
-    if (!dob) return 'N/A';
-    
-    // Check if dob is just an age number (some legacy data might be like this)
-    if (/^\d{1,3}$/.test(dob.trim())) {
-      return parseInt(dob.trim(), 10);
+  // Delete a dental record (reset tooth to sound)
+  const handleDeleteRecord = async (toothId: string) => {
+    const updated = { ...teethData };
+    delete updated[toothId];
+    await handleSaveTeethData(updated);
+  };
+
+  // Clear entire chart
+  const handleClearChart = async () => {
+    if (!confirm('Are you sure you want to reset all teeth findings in this chart?')) return;
+    await handleSaveTeethData({});
+  };
+
+  // Tooth selection in DentalChartCard
+  const handleSelectToothFromChart = (tooth: ToothRecord) => {
+    const existing = dentalRecords.find((r) => r.toothId === tooth.id);
+    if (existing) {
+      setEditingRecord(existing);
+    } else {
+      setEditingRecord({
+        toothId: tooth.id,
+        condition: tooth.condition || 'caries',
+        surfaces: tooth.surfaces || ['O'],
+        treatment: '',
+        price: undefined,
+        status: 'In Progress',
+        notes: '',
+      });
     }
-
-    const birthDate = new Date(dob);
-    if (isNaN(birthDate.getTime())) return dob; // Return raw value as fallback instead of N/A
-
-    const today = new Date();
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
-    }
-
-    return age;
+    setRecordModalOpen(true);
   };
 
-  // Generic print function to handle all print types
-  const handlePrintGeneric = (patient: Patient, content: string, title: string) => {
-    // Create a new window for the print document
+  // Update medical, notes, or profile fields
+  const handleUpdatePatientFields = async (updates: Partial<Patient>) => {
+    if (!selectedPatient) return;
+    await editPatient(selectedPatient.id, updates);
+  };
+
+  // Record a return visit
+  const handleLogVisit = async () => {
+    if (!selectedPatient) return;
+    try {
+      const { error } = await supabase.from('visits').insert({ patient_id: selectedPatient.id });
+      if (error) throw error;
+      alert('Return visit logged successfully.');
+      const v = await getPatientVisits(selectedPatient.id);
+      setPatientVisits(v || []);
+    } catch (err) {
+      console.error(err);
+      alert('Failed to log visit.');
+    }
+  };
+
+  // PDF & Print helpers
+  const handlePrintTreatmentCard = () => {
+    if (!selectedPatient) return;
     const printWindow = window.open('', '_blank');
     if (!printWindow) {
-      alert('Please allow popups for this website');
+      alert('Please allow popups to print');
       return;
     }
-
-    // Check if patient has necessary fields
-    if (!patient.name || !patient.clinicId) {
-      alert('Patient information is incomplete. Please ensure name and clinic ID are filled.');
-      printWindow.close();
-      return;
-    }
-
-    // Create content for the print window
     printWindow.document.write(`
       <!DOCTYPE html>
       <html>
       <head>
-        <title>${title} - ${patient.name}</title>
+        <title>Treatment Card - ${selectedPatient.name}</title>
         <style>
-          /* Reset all margins and paddings */
-          * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-          }
-          
-          html, body {
-            width: 148mm;
-            height: 210mm;
-            margin: 0;
-            padding: 0;
-            background: white;
-            font-family: Arial, sans-serif;
-            overflow: hidden;
-          }
-          
-          .print-container {
-            width: 148mm;
-            height: 210mm;
-            position: relative;
-            border: none;
-            display: flex;
-            margin: 0 auto;
-            background: white;
-            page-break-inside: avoid;
-            page-break-after: always;
-          }
-            
-          .report-image {
-            width: 100%;
-            height: 100%;
-            display: block;
-            position: absolute;
-            top: 0;
-            left: 0;
-            object-fit: contain;
-            object-position: top left;
-            image-rendering: -webkit-optimize-contrast;
-            image-rendering: crisp-edges;
-            image-rendering: pixelated;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-          }
-            
-          /* Treatment data container - positioned at middle left */
-          .treatment-data {
-            position: absolute;
-            top: 315px;  /* Shifted down and right */
-            left: 40px;
-            width: 90%;
-            padding: 10px;
-            box-sizing: border-box;
-          }
-          
-          .clinic-container {
-            position: absolute;
-            top: 276px;  /* Shifted down and to the right */
-            right: 72px;
-            width: 30%;
-            padding: 10px;
-            box-sizing: border-box;
-            display: flex;
-            justify-content: flex-end;
-          }
-          .clinic-id-label {
-            font-size: 10px;
-            font-weight: bold;
-            margin-right: 6px;
-          }
-          .clinic-id-value {
-            font-size: 10px;
-            font-weight: bold;
-          }
-
-          .name-arabic-container {
-            position: absolute;
-            top: 221px;  /* Shifted up tiny bit */
-            right: 110px; /* Shifted left to prevent overlap with اسم المريض label */
-            width: 40%;
-            padding: 10px;
-            box-sizing: border-box;
-            text-align: left; /* Left aligned to grow leftward naturally and prevent overlap */
-            font-size: 10px;
-            font-weight: bold;
-          }
-          
-          .age-arabic-container {
-            position: absolute;
-            top: 247px;  /* Shifted up tiny bit */
-            right: 125px; /* Shifted left to be on the dotted line */
-            width: 30%;
-            padding: 10px;
-            box-sizing: border-box;
-            text-align: right; /* Right aligned next to العمر label */
-            font-size: 10px;
-            font-weight: bold;
-          }
-
-          .date-container {
-            position: absolute;
-            top: 241px;  /* Shifted down */
-            left: 20px;  /* Shifted left to prevent overlap */
-            width: 150px;
-            padding: 10px;
-            box-sizing: border-box;
-            text-align: left; /* Left aligned to print directly on the dotted line */
-            font-size: 10px;
-            font-weight: bold;
-          }
-          
-          /* Current treatment */
-          .treatment-content {
-            font-size: 10px;
-            line-height: 1.6;
-            white-space: pre-wrap;
-            padding-top: 10px;
-            padding-left: 10px;
-            padding-right: 10px;
-          }
-          
-          @media print {
-            @page {
-              size: 148mm 210mm;
-              margin: 0 !important;
-              padding: 0 !important;
-              border: none !important;
-            }
-            
-            html, body {
-              width: 148mm !important;
-              height: 210mm !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              overflow: hidden !important;
-              background: white !important;
-            }
-            
-            .print-container {
-              width: 148mm !important;
-              height: 210mm !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              position: absolute !important;
-              top: 0 !important;
-              left: 0 !important;
-            }
-            
-            .report-image {
-              display: none !important;
-            }
-            
-            .name-arabic-container {
-              position: absolute !important;
-              top: 221px !important;
-              right: 110px !important;
-              width: 40% !important;
-              text-align: left !important;
-            }
-
-            .age-arabic-container {
-              position: absolute !important;
-              top: 247px !important;
-              right: 125px !important;
-              width: 30% !important;
-              text-align: right !important;
-            }
-
-            .date-container {
-              position: absolute !important;
-              top: 241px !important;
-              left: 20px !important;
-              width: 150px !important;
-              text-align: left !important;
-            }
-
-            .clinic-container {
-              position: absolute !important;
-              top: 276px !important;
-              right: 72px !important;
-              width: 30% !important;
-              padding: 10px !important;
-              box-sizing: border-box !important;
-              display: flex !important;
-              justify-content: flex-end !important;
-            }
-
-            .treatment-data {
-              position: absolute !important;
-              top: 315px !important;
-              left: 40px !important;
-              width: 90% !important;
-            }
-            
-            .print-button {
-              display: none !important;
-            }
-          }
-        
-          .print-button {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            padding: 8px 16px;
-            background: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-          }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 24px; color: #1e293b; }
+          .header { border-bottom: 2px solid #008294; padding-bottom: 12px; margin-bottom: 20px; }
+          h1 { color: #008294; margin: 0 0 6px 0; font-size: 22px; }
+          .meta { font-size: 13px; color: #64748b; }
+          .section { margin-top: 18px; }
+          .label { font-weight: bold; font-size: 13px; color: #475569; }
+          .value { font-size: 14px; margin-top: 4px; padding: 8px 12px; background: #f8fafc; border-radius: 6px; }
+          @media print { body { padding: 0; } }
         </style>
       </head>
       <body>
-        <div class="print-container">
-          <img src="/drhawar.jpg" class="report-image" />
-          
-          <!-- Name next to اسم المريض: -->
-          <div class="name-arabic-container">${patient.name}</div>
-          
-          <!-- Age next to العمر: -->
-          <div class="age-arabic-container">${calculateAge(patient.dob)}</div>
-
-          <!-- Today's date next to التاريخ: -->
-          <div class="date-container">${new Date().toISOString().split('T')[0]}</div>
-
-          <!-- Clinic ID next to green text -->
-          <div class="clinic-container">
-            <div class="clinic-id-label">clinic ID:</div>
-            <div class="clinic-id-value">${patient.clinicId}</div>
-          </div>
-
-          <!-- Treatment data in green area -->
-          <div class="treatment-data">
-            <!-- Content (without label) -->
-            <div class="treatment-content">${content}</div>
-          </div>
+        <div class="header">
+          <h1>Neom Dental Clinic — Treatment Record</h1>
+          <div class="meta">Patient: <strong>${selectedPatient.name}</strong> • File #: ${selectedPatient.hospitalFileNumber || 'N/A'} • Clinic ID: ${selectedPatient.clinicId || 'N/A'}</div>
         </div>
-        
-        <button class="print-button" onclick="window.print();return false;">Print</button>
+        <div class="section">
+          <div class="label">Primary Diagnosis:</div>
+          <div class="value">${selectedPatient.diagnosis || 'None specified'}</div>
+        </div>
+        <div class="section">
+          <div class="label">Current Treatment Plan:</div>
+          <div class="value">${selectedPatient.currentTreatment || selectedPatient.treatment || 'None specified'}</div>
+        </div>
+        <div class="section">
+          <div class="label">Medical History:</div>
+          <div class="value">${selectedPatient.history || 'No significant history'}</div>
+        </div>
         <script>
-          // Auto-print with better fit for A5 portrait
-          window.onload = function() {
-            // Force the window to be exactly A5 portrait size (148mm x 210mm)
-            document.documentElement.style.width = '148mm';
-            document.documentElement.style.height = '210mm';
-            document.body.style.width = '148mm';
-            document.body.style.height = '210mm';
-            
-            // Remove any browser-specific margins and borders
-            document.body.style.margin = '0';
-            document.body.style.padding = '0';
-            document.body.style.border = 'none';
-            document.body.style.overflow = 'hidden';
-            
-            // Apply browser-specific overrides for A5 portrait
-            const style = document.createElement('style');
-            style.textContent = "@media print { @page { size: 148mm 210mm; margin: 0 !important; } html, body { width: 148mm !important; height: 210mm !important; margin: 0 !important; } }";
-            document.head.appendChild(style);
-            
-            // Trigger print after ensuring layout is complete
-            setTimeout(function() {
-              window.print();
-            }, 800);
-          }
+          window.onload = function() { window.print(); }
         </script>
       </body>
       </html>
     `);
-
-    // Finish writing and close the document
     printWindow.document.close();
   };
 
-  // Print treatment function
-  const handlePrintTreatment = (patient: Patient) => {
-    const content = patient.currentTreatment || 'No current treatment specified.';
-    handlePrintGeneric(patient, content, 'Treatment Card');
-  };
-
-  // Handle Quick Actions for speed
-  const handleQuickAction = async (patient: Patient, actionType: 'exam' | 'prescription' | 'investigation') => {
-    try {
-      setIsPerformingQuickAction(patient.id);
-      
-      // Get the selected visit ID from the map, or default to the latest
-      const visits = patientVisitsMap[patient.id] || [];
-      const selectedId = selectedVisitIdMap[patient.id] || (visits.length > 0 ? visits[0].id : null);
-
-      if (!selectedId) {
-        alert("No visits found for this patient. Please add a visit first.");
-        return;
-      }
-      
-      // Fetch the FULL visit data for the selected visit
-      const { data: fullVisit, error } = await supabase
-        .from('visits')
-        .select('*')
-        .eq('id', selectedId)
-        .single();
-
-      if (error || !fullVisit) throw new Error('Failed to load visit details');
-      
-      setQuickActionVisit(fullVisit as Visit);
-      setQuickActionPatient(patient);
-      setEditVisitForm(fullVisit as Visit);
-      
-      if (actionType === 'exam') setShowQuickExamModal(true);
-      else if (actionType === 'prescription') setShowQuickPrescriptionModal(true);
-      else if (actionType === 'investigation') setShowQuickInvestigationModal(true);
-      
-    } catch (err) {
-      console.error('Error starting quick action:', err);
-      alert('Failed to load visit data.');
-    } finally {
-      setIsPerformingQuickAction(null);
-    }
-  };
-
-
-
-  // Handle report generation for a specific visit
-  const handleGenerateVisitReport = async (patient: Patient, visit: Visit) => {
-    try {
-      // Create a virtual patient object with data from this specific visit
-      const visitPatient: Patient = {
-        ...patient,
-        diagnosis: visit.diagnosis || patient.diagnosis,
-        treatment: visit.treatment || patient.treatment,
-        currentTreatment: visit.current_treatment || patient.currentTreatment,
-        history: visit.history || patient.history,
-        pastMedicalHistory: visit.past_medical_history || patient.pastMedicalHistory,
-        drugHistory: visit.drug_history || patient.drugHistory,
-        pastSurgicalHistory: visit.past_surgical_history || patient.pastSurgicalHistory,
-        examination: visit.examination || patient.examination,
-        followUpDate: visit.follow_up_date || patient.followUpDate,
-        note: visit.note || patient.note,
-        tableData: visit.table_data || patient.tableData,
-        prescription: visit.prescription || patient.prescription,
-      };
-      
-      await generatePatientPDF(visitPatient);
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      alert('Failed to generate PDF report. Please try again.');
-    }
-  };
-
-  // Handle report generation (default to latest)
-  const handleGenerateReport = async (patient: Patient) => {
-    try {
-      await generatePatientPDF(patient);
-    } catch (error) {
-      console.error('Error generating PDF:', error);
-      alert('Failed to generate PDF report. Please try again.');
-    }
-  };
-
-  // Handle logging a visit (returning patient)
-  const handleLogVisit = async (patient: Patient) => {
-    try {
-      // Import the function to ensure visits table exists
-      const { ensureVisitsTableExists } = await import('@/lib/supabase');
-
-      // Check if visits table exists
-      const visitsTableExists = await ensureVisitsTableExists();
-
-      if (!visitsTableExists) {
-        alert('Unable to record visit. The visits table does not exist in the database.');
-        return;
-      }
-
-      // Write a visit record; do not create duplicate patient
-      const { error } = await supabase.from('visits').insert({ patient_id: patient.id });
-
-      if (error) {
-        console.error('Error inserting visit record:', error);
-        alert('Failed to record visit. Database error.');
-        return;
-      }
-
-      alert('Visit recorded successfully.');
-
-      // Refresh the visits count in reports if possible
-      try {
-        // This is a simple event to inform other components that visits have changed
-        window.dispatchEvent(new CustomEvent('visitsUpdated'));
-      } catch (e) {
-        // Ignore errors from event dispatch
-      }
-    } catch (e) {
-      console.error('Error logging visit:', e);
-      alert('Failed to record visit.');
-    }
-  };
-
-  // Refresh data when component mounts
-  useEffect(() => {
-    refreshPatients();
-  }, []);
-
-  // Filter patients based on search term, active filter field, and age filter
-  const filteredPatients = patients.filter(patient => {
-    // Text search filter based on the active filter field
-    let matchesSearch = true;
-
-    if (searchTerm) {
-      const searchLower = searchTerm.toLowerCase();
-
-      if (activeFilter === 'all') {
-        // Search all fields
-        matchesSearch = Boolean(
-          patient.name.toLowerCase().includes(searchLower) ||
-          patient.hospitalFileNumber.toLowerCase().includes(searchLower) ||
-          patient.diagnosis.toLowerCase().includes(searchLower) ||
-          (patient.dob && calculateAge(patient.dob).toString().includes(searchLower)) ||
-          (patient.dob && patient.dob.includes(searchLower)) ||
-          (patient.treatment && patient.treatment.toLowerCase().includes(searchLower)) ||
-          (patient.sex && patient.sex.toLowerCase().includes(searchLower)) ||
-          (patient.history && patient.history.toLowerCase().includes(searchLower)) ||
-          (patient.mobileNumber && patient.mobileNumber.toLowerCase().includes(searchLower)) ||
-          (patient.clinicId && patient.clinicId.toLowerCase().includes(searchLower))
-        );
-      } else {
-        // Search specific field based on activeFilter
-        switch (activeFilter) {
-          case 'name':
-            matchesSearch = Boolean(patient.name.toLowerCase().includes(searchLower));
-            break;
-          case 'age':
-            matchesSearch = Boolean(patient.dob && calculateAge(patient.dob).toString().includes(searchLower));
-            break;
-          case 'diagnosis':
-            matchesSearch = Boolean(patient.diagnosis.toLowerCase().includes(searchLower));
-            break;
-          case 'treatment':
-            matchesSearch = Boolean(patient.treatment && patient.treatment.toLowerCase().includes(searchLower));
-            break;
-          case 'gender':
-            matchesSearch = Boolean(
-              patient.sex && patient.sex.trim().toLowerCase() === searchLower.trim().toLowerCase()
-            );
-            break;
-          case 'history':
-            matchesSearch = Boolean(patient.history && patient.history.toLowerCase().includes(searchLower));
-            break;
-          case 'mobile':
-            matchesSearch = Boolean(patient.mobileNumber && patient.mobileNumber.toLowerCase().includes(searchLower));
-            break;
-          case 'hospitalFile':
-            matchesSearch = Boolean(patient.hospitalFileNumber.toLowerCase().includes(searchLower));
-            break;
-          case 'clinicId':
-            matchesSearch = Boolean(patient.clinicId && patient.clinicId.toLowerCase().includes(searchLower));
-            break;
-          case 'dob':
-            matchesSearch = Boolean(patient.dob && patient.dob.includes(searchLower));
-            break;
-          default:
-            matchesSearch = true;
-        }
-      }
-    }
-
-    // Age filter
-    let matchesAge = true;
-    if (ageFilter !== 'all') {
-      const calculatedAge = calculateAge(patient.dob);
-      const patientAge = typeof calculatedAge === 'number' ? calculatedAge : 0;
-
-      switch (ageFilter) {
-        case 'under18':
-          matchesAge = patientAge < 18;
-          break;
-        case '18to30':
-          matchesAge = patientAge >= 18 && patientAge <= 30;
-          break;
-        case '31to50':
-          matchesAge = patientAge >= 31 && patientAge <= 50;
-          break;
-        case 'over50':
-          matchesAge = patientAge > 50;
-          break;
-        case 'custom':
-          const minAge = parseInt(customMinAge) || 0;
-          const maxAge = parseInt(customMaxAge) || 999;
-          matchesAge = patientAge >= minAge && patientAge <= maxAge;
-          break;
-        default:
-          matchesAge = true;
-      }
-    }
-
-    // Date filter: check if patient was created on that date OR visited on that date
-    let matchesDate = true;
-    const patientDateStr = getLocalDateString(patient.createdAt);
-    const todayStr = getLocalDateString(new Date().toISOString());
-    const getYesterdayDateString = () => {
-      const yesterday = new Date();
-      yesterday.setDate(yesterday.getDate() - 1);
-      const year = yesterday.getFullYear();
-      const month = String(yesterday.getMonth() + 1).padStart(2, '0');
-      const day = String(yesterday.getDate()).padStart(2, '0');
-      return `${year}-${month}-${day}`;
-    };
-    const yesterdayStr = getYesterdayDateString();
-
-    let targetDateStr = '';
-    if (dateFilter === 'today') {
-      targetDateStr = todayStr;
-    } else if (dateFilter === 'yesterday') {
-      targetDateStr = yesterdayStr;
-    } else if (dateFilter === 'custom' && customDateFilterValue) {
-      targetDateStr = customDateFilterValue;
-    }
-
-    if (targetDateStr) {
-      const matchesCreatedDate = patientDateStr === targetDateStr;
-      const visits = patientVisitsMap[patient.id] || [];
-      const matchesVisitDate = visits.some(v => getLocalDateString(v.visited_at) === targetDateStr);
-      matchesDate = matchesCreatedDate || matchesVisitDate;
-    }
-
-    // Smart Tooth Procedure Schedule filter
-    let matchesSchedule = true;
-    if (scheduleFilter !== 'all') {
-      const scheduleInfo = getPatientNextToothSchedule(patient);
-      if (scheduleFilter === 'due_today') {
-        matchesSchedule = Boolean(scheduleInfo.isDueToday || scheduleInfo.isOverdue);
-      } else if (scheduleFilter === 'next_7_days') {
-        matchesSchedule = Boolean(scheduleInfo.daysRemaining !== null && scheduleInfo.daysRemaining >= 0 && scheduleInfo.daysRemaining <= 7);
-      } else if (scheduleFilter === 'has_schedule') {
-        matchesSchedule = Boolean(scheduleInfo.next);
-      }
-    }
-
-    return matchesSearch && matchesAge && matchesDate && matchesSchedule;
-  });
-
-  // Handle patient selection for details view
-  const handleViewPatient = async (patient: Patient) => {
-    setSelectedPatient(patient);
-    setShowMobileDetails(true);
-    setIsEditing(false);
-    
-    // Fetch visits for this patient
-    setIsLoadingVisits(true);
-    try {
-      const visits = await getPatientVisits(patient.id);
-      setPatientVisits(visits);
-    } catch (err) {
-      console.error('Error loading visits:', err);
-    } finally {
-      setIsLoadingVisits(false);
-    }
-  };
-
-  // Handle patient deletion
-  const handleDeletePatient = async (id: string) => {
-    if (window.confirm('Are you sure you want to delete this patient record?')) {
-      try {
-        setIsDeleting(id);
-        await deletePatient(id);
-        if (selectedPatient?.id === id) {
-          setSelectedPatient(null);
-        }
-      } finally {
-        setIsDeleting(null);
-      }
-    }
-  };
-
-  // Handle visit deletion
-  const handleDeleteVisit = async (visitId: string) => {
-    if (isStaffAuth) {
-      alert("You don't have permission to delete visit records.");
-      return;
-    }
-
-    if (window.confirm('Are you sure you want to delete this visit record? This action cannot be undone.')) {
-      try {
-        setIsDeletingVisit(visitId);
-        await deleteVisit(visitId);
-        setPatientVisits(prev => prev.filter(v => v.id !== visitId));
-        await fetchAllVisitSummaries();
-        try {
-          window.dispatchEvent(new CustomEvent('visitsUpdated'));
-        } catch (e) {
-          // Ignore event dispatch errors
-        }
-      } catch (err) {
-        console.error('Error deleting visit:', err);
-        alert('Failed to delete visit record. Please try again.');
-      } finally {
-        setIsDeletingVisit(null);
-      }
-    }
-  };
-
-  // Handle patient edit form submission
-  const handleEditSubmit = async (data: Partial<Patient>) => {
+  const handleGeneratePDF = async () => {
     if (!selectedPatient) return;
-
     try {
-      await editPatient(selectedPatient.id, data);
-      // Update the selected patient with new data after successful edit
-      setSelectedPatient(prev => prev ? { ...prev, ...data } : null);
-      setIsEditing(false); // Close the form after successful edit
+      await generatePatientPDF(selectedPatient);
     } catch (err) {
-      console.error('Error updating patient:', err);
+      console.error('PDF error', err);
+      alert('Failed to generate PDF');
     }
   };
 
-  // Handle Excel export
-  const handleExportToExcel = () => {
+  const handleGenerateVisitReport = async (visit: Visit) => {
+    if (!selectedPatient) return;
     try {
-      if (isStaffAuth) {
-        alert("You don’t have permission to export data.");
-        return;
-      }
-      setIsExporting(true);
-
-      // Use the filtered patients if there's a search term, otherwise use all patients
-      const dataToExport = filteredPatients;
-
-      // Generate a filename with current date
-      const date = new Date().toISOString().split('T')[0]; // YYYY-MM-DD format
-      const filename = `patients-data-${date}`;
-
-      // Export the data
-      exportToExcel(dataToExport, filename);
+      const vPatient: Patient = {
+        ...selectedPatient,
+        diagnosis: visit.diagnosis || selectedPatient.diagnosis,
+        treatment: visit.treatment || selectedPatient.treatment,
+        currentTreatment: visit.current_treatment || selectedPatient.currentTreatment,
+        history: visit.history || selectedPatient.history,
+        examination: visit.examination || selectedPatient.examination,
+        note: visit.note || selectedPatient.note,
+      };
+      await generatePatientPDF(vPatient);
     } catch (err) {
-      console.error('Error exporting to Excel:', err);
-      alert('Failed to export data. Please try again.');
-    } finally {
-      setIsExporting(false);
+      console.error('Visit report error', err);
+      alert('Failed to generate visit report');
     }
   };
 
-  // Toggle back to list view on mobile
-  const handleBackToList = () => {
-    setShowMobileDetails(false);
+  const handleExportExcel = () => {
+    exportToExcel(patients);
   };
 
-  // Loading state
-  if (isLoading && patients.length === 0) {
+  // If in directory mode or no patient selected, render clean directory view
+  if (showDirectory || !selectedPatient) {
     return (
-      <div className="p-4 md:p-6 flex items-center justify-center h-96">
-        <div className="text-center">
-          <svg className="inline animate-spin h-10 w-10 text-indigo-600 dark:text-indigo-400 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-          </svg>
-          <p className="text-gray-700 dark:text-gray-300">Loading patients data...</p>
-        </div>
+      <div className="max-w-7xl mx-auto space-y-6 pb-12">
+        <PatientDirectoryView
+          patients={patients}
+          onSelectPatient={(p) => {
+            setSelectedPatientId(p.id);
+            setShowDirectory(false);
+          }}
+          onExportExcel={handleExportExcel}
+        />
       </div>
     );
   }
 
-  // Error state
-  if (error) {
-    return (
-      <div className="p-4 md:p-6">
-        <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-700 p-4 rounded-lg text-red-700 dark:text-red-300">
-          <h3 className="text-lg font-medium mb-2">Error Loading Data</h3>
-          <p>{error}</p>
-          <button
-            onClick={() => refreshPatients()}
-            className="mt-4 px-4 py-2 bg-red-600 text-white rounded hover:bg-red-700 inline-flex items-center"
-          >
-            <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-            </svg>
-            Try Again
-          </button>
-        </div>
-      </div>
-    );
-  }
+  // Section title for breadcrumbs
+  const sectionTitleMap: Record<PatientTab, string> = {
+    profile: 'Profile details',
+    dental: 'Dental history',
+    medical: 'Medical history',
+    appointments: 'Appointments schedule',
+    invoices: 'Financial invoices',
+    documents: 'Clinical documents',
+    notes: 'Clinical notes',
+  };
 
   return (
-    <>
-    <div className="p-4 md:p-6">
-      {/* Header Section */}
-      <div className="mb-6">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-4">
-          <div>
-            <h1 className="text-2xl font-semibold text-gray-800 dark:text-white">Patients Records</h1>
-            <p className="text-gray-600 dark:text-gray-300 mt-1">
-              {filteredPatients.length} {filteredPatients.length === 1 ? 'record' : 'records'} found
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Link href="/dashboard/patient-form" className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-md transition duration-150 inline-flex items-center">
-              <svg className="h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-              </svg>
-              Add Patient
-            </Link>
-            {!isStaffAuth && (
-              <button
-                onClick={handleExportToExcel}
-                disabled={isExporting || filteredPatients.length === 0}
-                className="px-4 py-2 bg-slate-700 hover:bg-slate-800 dark:bg-slate-600 dark:hover:bg-slate-500 disabled:opacity-50 text-white rounded-lg shadow-md transition duration-150 inline-flex items-center"
-              >
-                {isExporting ? (
-                  <>
-                    <svg className="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    Exporting...
-                  </>
-                ) : (
-                  <>
-                    <svg className="h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                    </svg>
-                    Export Excel
-                  </>
-                )}
-              </button>
-            )}
-          </div>
+    <div className="max-w-7xl mx-auto space-y-6 pb-12">
+      {/* Patient Header matching user screenshot */}
+      <PatientHeader
+        patient={selectedPatient}
+        allPatients={patients}
+        onSelectPatient={(p) => setSelectedPatientId(p.id)}
+        onOpenDirectory={() => setShowDirectory(true)}
+        onEditPatient={() => setIsEditingPatient(true)}
+        onPrintPatient={handlePrintTreatmentCard}
+        currentSectionTitle={sectionTitleMap[activeTab]}
+      />
+
+      {/* Horizontal Pill Navigation Tabs matching user screenshot */}
+      <PatientNavTabs
+        activeTab={activeTab}
+        onChangeTab={setActiveTab}
+        badgeCounts={{
+          dental: dentalRecords.length,
+          appointments: toothSchedules.length,
+        }}
+      />
+
+      {/* Tab Panels */}
+      {activeTab === 'dental' && (
+        <div className="space-y-6 animate-in fade-in duration-200">
+          {/* Card 1: Dental Chart Card matching screenshot */}
+          <DentalChartCard
+            teethData={teethData}
+            onSelectTooth={handleSelectToothFromChart}
+            onClearChart={handleClearChart}
+          />
+
+          {/* Card 2: Dental Records Card matching screenshot */}
+          <DentalRecordsCard
+            records={dentalRecords}
+            onAddRecord={() => {
+              setEditingRecord(null);
+              setRecordModalOpen(true);
+            }}
+            onEditRecord={(rec) => {
+              setEditingRecord(rec);
+              setRecordModalOpen(true);
+            }}
+            onDeleteRecord={handleDeleteRecord}
+            onScheduleTooth={(toothId) => {
+              setSchedulerInitialToothId(toothId);
+              setShowSchedulerModal(true);
+            }}
+          />
         </div>
+      )}
 
-        {/* Smart Clinical Queue / Inbox Filter Tabs */}
-        <div className="flex items-center gap-2 mb-4 overflow-x-auto pb-1">
-          <button
-            type="button"
-            onClick={() => setScheduleFilter('all')}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer ${
-              scheduleFilter === 'all'
-                ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 shadow-md'
-                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750'
-            }`}
-          >
-            <span className="flex items-center gap-1.5"><FolderKanban className="w-3.5 h-3.5" /> All Patients</span>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] ${scheduleFilter === 'all' ? 'bg-white/20 text-white dark:bg-gray-900/20 dark:text-gray-900' : 'bg-gray-100 dark:bg-gray-750 text-gray-600 dark:text-gray-300'}`}>
-              {patients.length}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setScheduleFilter('due_today')}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer ${
-              scheduleFilter === 'due_today'
-                ? 'bg-red-600 text-white shadow-md shadow-red-500/30'
-                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-red-50 dark:hover:bg-red-950/20 hover:border-red-300'
-            }`}
-          >
-            <span className="flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-              <Flame className="w-3.5 h-3.5" /> Due Today & Overdue
-            </span>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] ${scheduleFilter === 'due_today' ? 'bg-white/20 text-white' : 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300 font-black'}`}>
-              {dueTodayCount}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setScheduleFilter('next_7_days')}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer ${
-              scheduleFilter === 'next_7_days'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/30'
-                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:border-indigo-300'
-            }`}
-          >
-            <span className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" /> Next 7 Days</span>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] ${scheduleFilter === 'next_7_days' ? 'bg-white/20 text-white' : 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 font-black'}`}>
-              {next7DaysCount}
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setScheduleFilter('has_schedule')}
-            className={`inline-flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all shadow-xs shrink-0 cursor-pointer ${
-              scheduleFilter === 'has_schedule'
-                ? 'bg-indigo-600 text-white shadow-md shadow-indigo-500/30'
-                : 'bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:bg-indigo-50 dark:hover:bg-indigo-950/20 hover:border-indigo-300'
-            }`}
-          >
-            <span className="flex items-center gap-1.5"><ToothIcon className="w-3.5 h-3.5" /> With Scheduled Teeth</span>
-            <span className={`px-2 py-0.5 rounded-full text-[10px] ${scheduleFilter === 'has_schedule' ? 'bg-white/20 text-white' : 'bg-indigo-100 dark:bg-indigo-900/50 text-indigo-800 dark:text-indigo-300 font-black'}`}>
-              {hasScheduleCount}
-            </span>
-          </button>
+      {activeTab === 'profile' && (
+        <div className="animate-in fade-in duration-200">
+          <PatientProfileTab
+            patient={selectedPatient}
+            onEdit={() => setIsEditingPatient(true)}
+          />
         </div>
+      )}
 
-        {/* Search and Filter Section */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-4 mb-6">
-          <div className="flex flex-col lg:flex-row lg:items-center gap-4">
-            <div className="relative flex-grow">
-              <input
-                type="text"
-                placeholder={
-                  activeFilter === 'all'
-                    ? "Search all patient fields..."
-                    : activeFilter === 'name'
-                      ? "Search by patient name..."
-                      : activeFilter === 'age'
-                        ? "Search by age..."
-                        : activeFilter === 'diagnosis'
-                          ? "Search by diagnosis..."
-                          : activeFilter === 'treatment'
-                            ? "Search by treatment..."
-                            : activeFilter === 'gender'
-                              ? "Search by gender..."
-                              : activeFilter === 'history'
-                                ? "Search by history..."
-                                : activeFilter === 'mobile'
-                                  ? "Search by mobile number..."
-                                  : activeFilter === 'hospitalFile'
-                                    ? "Search by hospital file number..."
-                                    : activeFilter === 'dob'
-                                      ? "Search by DOB..."
-                                      : "Search by clinic ID..."
-                }
-                className="w-full pl-10 pr-4 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
-              <div className="absolute left-3 top-1/2 transform -translate-y-1/2">
-                <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                </svg>
-              </div>
-            </div>
-
-            {/* Quick Date Filters */}
-            <div className="flex flex-wrap items-center gap-1.5 bg-gray-50 dark:bg-gray-700/50 p-1.5 rounded-xl border border-gray-200 dark:border-gray-700">
-              {['today', 'yesterday', 'all', 'custom'].map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => setDateFilter(opt)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                    dateFilter === opt
-                      ? 'bg-indigo-600 text-white shadow-sm'
-                      : 'text-gray-600 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-600'
-                  }`}
-                >
-                  {opt === 'today' ? "Today" : opt === 'yesterday' ? 'Yesterday' : opt === 'all' ? 'All' : 'Custom Date'}
-                </button>
-              ))}
-              
-              {dateFilter === 'custom' && (
-                <input
-                  type="date"
-                  value={customDateFilterValue}
-                  onChange={(e) => setCustomDateFilterValue(e.target.value)}
-                  className="px-2 py-1 border border-gray-200 dark:border-gray-700 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-white text-xs font-semibold focus:ring-1 focus:ring-indigo-500"
-                />
-              )}
-            </div>
-
-            <div className="relative">
-              <button
-                onClick={() => setIsFilterOpen(!isFilterOpen)}
-                className="w-full md:w-auto px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-200 rounded-lg inline-flex items-center justify-center hover:bg-gray-200 dark:hover:bg-gray-600 transition duration-150"
-              >
-                <svg className="h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
-                </svg>
-                Filters
-                {ageFilter !== 'all' && (
-                  <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-indigo-100 text-indigo-800">
-                    {ageFilter === 'custom' && (customMinAge || customMaxAge) ? '2' : '1'}
-                  </span>
-                )}
-              </button>
-
-              {isFilterOpen && (
-                <div className="absolute z-50 mt-2 w-80 right-0 md:right-auto bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 p-4">
-                  {/* Search Field Selector */}
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Search Field
-                    </label>
-                    <select
-                      value={activeFilter}
-                      onChange={(e) => setActiveFilter(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                    >
-                      <option value="all">All Fields</option>
-                      <option value="name">Name</option>
-                      <option value="age">Age</option>
-                      <option value="diagnosis">Diagnosis</option>
-                      <option value="treatment">Treatment</option>
-                      <option value="gender">Gender</option>
-                      <option value="history">History</option>
-                      <option value="mobile">Mobile Number</option>
-                      <option value="hospitalFile">Hospital File Number</option>
-                      <option value="clinicId">Clinic ID</option>
-                      <option value="dob">Date of Birth</option>
-                    </select>
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                      Select "All Fields" to search across all patient data
-                    </p>
-                  </div>
-
-                  {/* Age Filter Section */}
-                  <div className="mb-4">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Age Range
-                    </label>
-                    <select
-                      value={ageFilter}
-                      onChange={(e) => setAgeFilter(e.target.value)}
-                      className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                    >
-                      <option value="all">All Ages</option>
-                      <option value="under18">Under 18</option>
-                      <option value="18to30">18-30</option>
-                      <option value="31to50">31-50</option>
-                      <option value="over50">Over 50</option>
-                      <option value="custom">Custom Range</option>
-                    </select>
-                  </div>
-
-                  {ageFilter === 'custom' && (
-                    <div className="mb-4">
-                      <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                        Custom Age Range (Min - Max)
-                      </label>
-                      <div className="flex gap-2">
-                        <input
-                          type="number"
-                          placeholder="Min Age"
-                          value={customMinAge}
-                          onChange={(e) => setCustomMinAge(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                        />
-                        <input
-                          type="number"
-                          placeholder="Max Age"
-                          value={customMaxAge}
-                          onChange={(e) => setCustomMaxAge(e.target.value)}
-                          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-                        />
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="flex justify-between">
-                    <button
-                      onClick={() => {
-                        setAgeFilter('all');
-                        setCustomMinAge('');
-                        setCustomMaxAge('');
-                        setActiveFilter('all');
-                        setSearchTerm('');
-                        setIsFilterOpen(false);
-                      }}
-                      className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
-                    >
-                      Clear All Filters
-                    </button>
-                    <button
-                      onClick={() => setIsFilterOpen(false)}
-                      className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 text-sm"
-                    >
-                      Apply
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
+      {activeTab === 'medical' && (
+        <div className="animate-in fade-in duration-200">
+          <PatientMedicalTab
+            patient={selectedPatient}
+            onSaveMedical={handleUpdatePatientFields}
+          />
         </div>
-      </div>
+      )}
 
-      {/* Mobile View: Toggle between list and details */}
-      <div className="block md:hidden mb-4">
-        {showMobileDetails && selectedPatient && (
-          <button
-            onClick={handleBackToList}
-            className="inline-flex items-center px-3 py-2 border border-gray-300 dark:border-gray-700 shadow-sm text-sm leading-4 font-medium rounded-md text-gray-700 dark:text-gray-200 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700"
-          >
-            <svg className="h-4 w-4 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
-            Back to List
-          </button>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Patients List - Only render if not editing */}
-        {!isEditing && (
-          <div className={`lg:col-span-1 bg-white dark:bg-gray-800 rounded-lg shadow-md overflow-hidden ${showMobileDetails ? 'hidden md:block' : 'block'}`}>
-            <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-              <h2 className="text-lg font-medium text-gray-900 dark:text-white">Patient List</h2>
-            </div>
-
-              <div className="divide-y divide-gray-200 dark:divide-gray-700 max-h-[600px] overflow-y-auto">
-              {filteredPatients.length > 0 ? (
-                filteredPatients.map((patient) => {
-                  const nextToothInfo = getPatientNextToothSchedule(patient);
-                  return (
-                    <div
-                      key={patient.id}
-                      className={`p-4 hover:bg-gray-50 dark:hover:bg-gray-750 cursor-pointer transition-colors ${
-                        selectedPatient?.id === patient.id ? 'bg-indigo-50/70 dark:bg-indigo-950/40 border-l-4 border-indigo-600' : ''
-                      }`}
-                      onClick={() => handleViewPatient(patient)}
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="min-w-0 flex-1 pr-2">
-                          <h3 className="text-sm font-bold text-gray-900 dark:text-white truncate">{patient.name}</h3>
-                          <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                            <span className="text-xs text-gray-600 dark:text-gray-300 font-medium">
-                              Age: {calculateAge(patient.dob)}
-                            </span>
-                            {patient.sex && (
-                              <span className="text-xs text-gray-400">· {patient.sex}</span>
-                            )}
-                            {patient.diagnosis && (
-                              <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[140px]">
-                                · {patient.diagnosis}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Prominent First Visit Display — Doctor's Request #1 */}
-                          <div className="mt-2 inline-flex items-center gap-1.5 text-[11px] font-bold text-indigo-700 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-950/60 px-2.5 py-1 rounded-md border border-indigo-100 dark:border-indigo-800/60">
-                            <Calendar className="w-3 h-3 text-gray-400" />
-                            <span>1st Visit: {formatDate(patient.createdAt)}</span>
-                          </div>
-                          {/* Remaining Balance / Due Badge */}
-                          {patient.remainingBalance !== undefined && Number(patient.remainingBalance) > 0 && (
-                            <div className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-bold text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/50 px-2.5 py-1 rounded-md border border-red-200 dark:border-red-800/60">
-                              <AlertTriangle className="w-3 h-3" />
-                              <span>Due: ${Number(patient.remainingBalance).toLocaleString()}</span>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="flex flex-col items-end gap-1 shrink-0">
-                          <span className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-950/60 dark:text-blue-300 rounded-full px-2.5 py-0.5 font-bold font-mono">
-                            {patient.clinicId}
-                          </span>
-                          {patient.hospitalFileNumber && (
-                            <span className="text-[11px] bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300 rounded-full px-2 py-0.5">
-                              #{patient.hospitalFileNumber}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Next Scheduled Tooth Badge — Doctor's Request #2 */}
-                      {nextToothInfo.next && (
-                        <div className={`mt-2.5 flex items-center justify-between gap-2 p-2 rounded-xl border ${
-                          nextToothInfo.isDueToday || nextToothInfo.isOverdue
-                            ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800/60'
-                            : 'bg-slate-50 dark:bg-slate-800/60 border-slate-200 dark:border-slate-700/60'
-                        }`}>
-                          <div className="flex items-center gap-2 min-w-0">
-                            <span className={`w-7 h-7 rounded-lg text-white font-bold text-xs flex items-center justify-center shrink-0 shadow-xs ${
-                              nextToothInfo.isDueToday || nextToothInfo.isOverdue ? 'bg-red-600' : 'bg-indigo-600'
-                            }`}>
-                              #{nextToothInfo.next.toothId}
-                            </span>
-                            <div className="min-w-0 truncate">
-                              <div className="text-xs font-bold text-gray-900 dark:text-white truncate">
-                                {nextToothInfo.next.procedure} {nextToothInfo.next.palmer ? `(${nextToothInfo.next.palmer})` : ''}
-                              </div>
-                              <div className="text-[10px] font-semibold">
-                                {nextToothInfo.isDueToday ? (
-                                  <span className="text-red-600 dark:text-red-400 font-extrabold flex items-center gap-1">
-                                    <span className="w-1.5 h-1.5 rounded-full bg-red-600 animate-ping inline-block" />
-                                    <Flame className="w-3 h-3 inline" /> DUE TODAY {nextToothInfo.next.targetTime ? `at ${nextToothInfo.next.targetTime}` : ''}
-                                  </span>
-                                ) : nextToothInfo.isOverdue ? (
-                                  <span className="text-red-600 dark:text-red-400 font-bold">
-                                    {Math.abs(nextToothInfo.daysRemaining!)}d Overdue ({nextToothInfo.next.targetDate})
-                                  </span>
-                                ) : nextToothInfo.daysRemaining === 1 ? (
-                                  <span className="text-indigo-600 dark:text-indigo-400 font-bold">
-                                    <Calendar className="w-3 h-3 inline mr-0.5" /> Tomorrow at {nextToothInfo.next.targetTime || '10:00'}
-                                  </span>
-                                ) : (
-                                  <span className="text-slate-600 dark:text-slate-400 font-medium">
-                                    <Clock className="w-3 h-3 inline mr-0.5" /> In {nextToothInfo.daysRemaining} days ({nextToothInfo.next.targetDate})
-                                  </span>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSchedulerPatient(patient);
-                              setSchedulerInitialToothId(nextToothInfo.next!.toothId);
-                              setShowSchedulerModal(true);
-                            }}
-                            className="text-[10px] font-bold text-slate-600 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 px-2 py-1 rounded-md bg-white/80 dark:bg-gray-800/80 border border-slate-200 dark:border-slate-700/60 shadow-xs shrink-0 cursor-pointer"
-                          >
-                            Edit
-                          </button>
-                        </div>
-                      )}
-
-                      {/* Quick Actions Row */}
-                      {!isStaffAuth && (
-                        <div className="mt-3 flex items-center gap-1.5 pt-2.5 border-t border-gray-100 dark:border-gray-700/60">
-                          {/* Direct Schedule Tooth button */}
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSchedulerPatient(patient);
-                              setSchedulerInitialToothId(undefined);
-                              setShowSchedulerModal(true);
-                            }}
-                            className="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-[10px] font-bold uppercase tracking-tight transition-colors shadow-xs flex items-center gap-1 cursor-pointer shrink-0"
-                            title="Schedule Procedure for a Tooth"
-                          >
-                            <Calendar className="w-3 h-3" /> Schedule Tooth
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })
-              ) : (
-                <div className="p-8 text-center text-gray-500 dark:text-gray-400">
-                  No patients found. Please add a patient or adjust your search.
-                </div>
-              )}
-            </div>
-
-            {/* Show loading indicator when refreshing data */}
-            {isLoading && patients.length > 0 && (
-              <div className="p-2 bg-gray-50 dark:bg-gray-700 text-center">
-                <svg className="inline animate-spin h-4 w-4 text-indigo-600 dark:text-indigo-400 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <span className="text-xs text-gray-600 dark:text-gray-300">Refreshing...</span>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Patient Details */}
-        <div className={`${isEditing ? 'lg:col-span-3' : 'lg:col-span-2'} bg-white dark:bg-gray-800 rounded-lg shadow-md ${!showMobileDetails ? 'hidden md:block' : 'block'}`}>
-          {selectedPatient ? (
-            <div className="p-4 md:p-6">
-              {!isEditing ? (
-                <>
-                  <div className="flex justify-between items-start mb-6">
-                    <div>
-                      <h2 className="text-xl font-semibold text-gray-900 dark:text-white">{selectedPatient.name}</h2>
-                      <div className="flex flex-wrap gap-2 mt-2">
-                        <span className="px-3 py-1 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 rounded-full font-medium text-sm">
-                          Clinic ID: {selectedPatient.clinicId}
-                        </span>
-                        <span className="px-3 py-1 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 rounded-full text-sm">
-                          File #: {selectedPatient.hospitalFileNumber}
-                        </span>
-                      </div>
-                      
-                      {/* Prominent First Visit Admission Card & Quick Tooth Schedule */}
-                      <div className="mt-3 flex items-center gap-3 flex-wrap">
-                        <div className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-50 to-blue-50 dark:from-indigo-950/60 dark:to-blue-950/60 border border-indigo-200 dark:border-indigo-800/80 px-3.5 py-1.5 rounded-xl shadow-xs">
-                           <Calendar className="w-4 h-4 text-indigo-500" />
-                          <div>
-                            <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 block leading-tight">
-                              First Visit / Admission Date
-                            </span>
-                            <span className="text-xs font-bold text-gray-900 dark:text-white">
-                              {formatDate(selectedPatient.createdAt)}
-                            </span>
-                          </div>
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setSchedulerPatient(selectedPatient);
-                            setShowSchedulerModal(true);
-                          }}
-                          className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
-                        >
-                          <Calendar className="w-3.5 h-3.5" /> Schedule Tooth Procedure
-                        </button>
-                      </div>
-                    </div>
-                    <div className="flex space-x-2">
-                      <button
-                        onClick={() => setIsEditing(true)}
-                        className="p-2 text-indigo-600 hover:bg-indigo-100 rounded-md transition duration-150"
-                        title="Edit Patient"
-                      >
-                        <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                        </svg>
-                      </button>
-
-
-                      <button
-                        onClick={() => handleDeletePatient(selectedPatient.id)}
-                        disabled={isDeleting === selectedPatient.id}
-                        className={`p-2 text-red-600 hover:bg-red-100 rounded-md transition duration-150 ${isDeleting === selectedPatient.id ? 'opacity-50 cursor-not-allowed' : ''
-                          }`}
-                        title="Delete Patient"
-                      >
-                        {isDeleting === selectedPatient.id ? (
-                          <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="2"></circle>
-                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                          </svg>
-                        ) : (
-                          <svg className="h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                          </svg>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-6 mb-6">
-                    <div className="bg-gray-50 dark:bg-gray-700 p-4 rounded-lg">
-                      <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">Personal Information</h3>
-                      <div className="space-y-3">
-                        <div className="flex justify-between">
-                          <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Age</span>
-                          <span className="text-sm text-gray-900 dark:text-gray-100">{calculateAge(selectedPatient.dob)}</span>
-                        </div>
-                        {selectedPatient.sex && (
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Sex</span>
-                            <span className="text-sm text-gray-900 dark:text-gray-100">{selectedPatient.sex}</span>
-                          </div>
-                        )}
-                        {selectedPatient.mobileNumber && (
-                          <div className="flex justify-between">
-                            <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Mobile</span>
-                            <span className="text-sm text-gray-900 dark:text-gray-100">{selectedPatient.mobileNumber}</span>
-                          </div>
-                        )}
-                        <div className="flex justify-between items-center mt-2 pt-2 border-t border-gray-200 dark:border-gray-600">
-                          <span className="text-sm font-bold text-indigo-600 dark:text-indigo-400">Clinic ID</span>
-                          <span className="text-sm font-bold text-gray-900 dark:text-white bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded">{selectedPatient.clinicId}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Financial & Payment Overview Card — Multi-visit Aggregate */}
-                    {selectedPatientFinancials.visitsCount > 0 && (
-                      <div className="bg-slate-50 dark:bg-slate-800/40 border border-slate-200 dark:border-slate-700/60 p-4 rounded-xl">
-                        <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-3 flex items-center gap-2">
-                          <TrendingUp className="w-4 h-4" />
-                          Financial Overview
-                          <span className="ml-auto text-[10px] font-normal text-slate-400">{selectedPatientFinancials.visitsCount} visit{selectedPatientFinancials.visitsCount !== 1 ? 's' : ''} total</span>
-                        </h3>
-                        <div className="grid grid-cols-3 gap-2">
-                          <div className="flex flex-col items-center p-2.5 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
-                            <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Total Paid</span>
-                            <span className="text-sm font-extrabold text-slate-800 dark:text-slate-200 font-mono">${selectedPatientFinancials.totalSpent.toLocaleString()}</span>
-                          </div>
-                          <div className="flex flex-col items-center p-2.5 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700">
-                            <span className="text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1">Total Invoiced</span>
-                            <span className="text-sm font-extrabold text-slate-800 dark:text-slate-200 font-mono">${selectedPatientFinancials.totalInvoiced.toLocaleString()}</span>
-                          </div>
-                          <div className={`flex flex-col items-center p-2.5 rounded-lg border ${
-                            selectedPatientFinancials.totalDue > 0
-                              ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800/60'
-                              : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
-                          }`}>
-                            <span className={`text-[9px] font-bold uppercase tracking-wider mb-1 ${selectedPatientFinancials.totalDue > 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-500 dark:text-slate-400'}`}>Balance Due</span>
-                            {selectedPatientFinancials.totalDue > 0 ? (
-                              <span className="text-sm font-extrabold text-red-700 dark:text-red-300 font-mono">${selectedPatientFinancials.totalDue.toLocaleString()}</span>
-                            ) : (
-                              <span className="flex items-center gap-1 text-sm font-extrabold text-slate-600 dark:text-slate-300">
-                                <CheckCircle2 className="w-3.5 h-3.5" /> Paid
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        {selectedPatientFinancials.totalDue > 0 && (
-                          <div className="mt-2.5 flex items-center gap-2 p-2 rounded-lg bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800/40">
-                            <AlertCircle className="w-3.5 h-3.5 text-red-600 dark:text-red-400 shrink-0" />
-                            <span className="text-[11px] font-bold text-red-700 dark:text-red-300">Outstanding balance across all visits: <span className="font-mono">${selectedPatientFinancials.totalDue.toLocaleString()} USD</span></span>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Scheduled Tooth Procedures Management */}
-                  <div className="mb-6 p-4 rounded-2xl bg-slate-50 dark:bg-slate-800/30 border border-slate-200 dark:border-slate-700/50">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2 uppercase tracking-wider">
-                        <Clock className="w-4 h-4" />
-                        <span>Scheduled Tooth Procedures ({selectedPatientSchedules.length})</span>
-                      </h3>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setSchedulerPatient(selectedPatient);
-                          setSchedulerInitialToothId(undefined);
-                          setShowSchedulerModal(true);
-                        }}
-                        className="text-xs font-bold px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-sm flex items-center gap-1.5 transition-colors cursor-pointer"
-                      >
-                        <Calendar className="w-3.5 h-3.5" /> + Schedule Tooth
-                      </button>
-                    </div>
-
-                    {selectedPatientSchedules.length > 0 ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {selectedPatientSchedules.map(sch => (
-                          <div
-                            key={sch.id}
-                            className="flex items-center justify-between p-3 rounded-xl bg-white dark:bg-gray-800 border border-indigo-200 dark:border-indigo-800/60 shadow-xs"
-                          >
-                            <div className="flex items-center gap-2.5">
-                              <span className="w-8 h-8 rounded-lg bg-indigo-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">
-                                #{sch.toothId}
-                              </span>
-                              <div>
-                                <div className="text-xs font-bold text-gray-900 dark:text-white">
-                                  {sch.procedure} {sch.palmer ? `(${sch.palmer})` : ''}
-                                </div>
-                                <div className="text-[11px] text-indigo-600 dark:text-indigo-400 font-semibold">
-                                  {sch.targetDate} {sch.targetTime ? `at ${sch.targetTime}` : ''}
-                                </div>
-                              </div>
-                            </div>
-                            <Badge variant={sch.status === 'Completed' ? 'success' : 'warning'} className="text-[10px]">
-                              {sch.status}
-                            </Badge>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <p className="text-xs text-gray-400 dark:text-gray-500 italic">
-                        No procedures scheduled for specific teeth yet. Click &quot;+ Schedule Tooth&quot; to plan next procedure.
-                      </p>
-                    )}
-                  </div>
-
-                  {/* Dentition Chart Section */}
-                  <div className="mb-8">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-base font-bold text-gray-900 dark:text-white flex items-center gap-2">
-                        <ToothIcon className="w-5 h-5 text-indigo-500" /> Dentition Chart
-                      </h3>
-                      {!isStaffAuth && (
-                        <button
-                          type="button"
-                          onClick={() => setIsEditing(true)}
-                          className="text-xs font-semibold px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-900/30 dark:hover:bg-indigo-900/50 text-indigo-700 dark:text-indigo-300 rounded-lg border border-indigo-200 dark:border-indigo-800 transition-colors flex items-center gap-1.5"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                          </svg>
-                          Edit Chart
-                        </button>
-                      )}
-                    </div>
-                    <DentitionChart
-                      value={selectedPatient.tableData}
-                      patientAge={selectedPatient.dob}
-                      readOnly={false}
-                      onScheduleTooth={(tooth) => {
-                        const toothId = typeof tooth === 'string' ? tooth : tooth.id;
-                        setSchedulerPatient(selectedPatient);
-                        setSchedulerInitialToothId(toothId);
-                        setShowSchedulerModal(true);
-                      }}
-                      onChange={async (newChartVal) => {
-                        try {
-                          await editPatient(selectedPatient.id, { tableData: newChartVal });
-                          setSelectedPatient(prev => prev ? { ...prev, tableData: newChartVal } : null);
-                        } catch (err) {
-                          console.error('Failed to auto-save dentition chart', err);
-                        }
-                      }}
-                    />
-                  </div>
-
-
-                  {/* Visit History Section */}
-                  <div className="mt-8 pt-8 border-t border-gray-100 dark:border-gray-700">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center">
-                        <Clock className="h-5 w-5 mr-2 text-indigo-500" />
-                        Visit History
-                        <span className="ml-2 px-2 py-0.5 bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400 text-xs rounded-full font-normal">
-                          {patientVisits.length} visits
-                        </span>
-                      </h3>
-                    </div>
-
-                    {/* Aggregate Financial Summary Bar */}
-                    {selectedPatientFinancials.visitsCount > 1 && (
-                      <div className="mb-4 flex flex-wrap gap-2 p-3 rounded-xl bg-gradient-to-r from-slate-50 to-gray-50 dark:from-slate-900/40 dark:to-gray-900/30 border border-gray-200 dark:border-gray-700">
-                        <div className="flex items-center gap-1.5 text-xs">
-                          <DollarSign className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-                          <span className="text-gray-500 dark:text-gray-400">Total Paid:</span>
-                          <span className="font-bold text-emerald-700 dark:text-emerald-300 font-mono">${selectedPatientFinancials.totalSpent.toLocaleString()}</span>
-                        </div>
-                        <span className="text-gray-300 dark:text-gray-600">·</span>
-                        <div className="flex items-center gap-1.5 text-xs">
-                          <CreditCard className="w-3.5 h-3.5 text-blue-500 dark:text-blue-400" />
-                          <span className="text-gray-500 dark:text-gray-400">Invoiced:</span>
-                          <span className="font-bold text-blue-700 dark:text-blue-300 font-mono">${selectedPatientFinancials.totalInvoiced.toLocaleString()}</span>
-                        </div>
-                        {selectedPatientFinancials.totalDue > 0 && (
-                          <>
-                            <span className="text-gray-300 dark:text-gray-600">·</span>
-                            <div className="flex items-center gap-1.5 text-xs">
-                              <AlertTriangle className="w-3.5 h-3.5 text-red-500" />
-                              <span className="text-red-600 dark:text-red-400 font-bold">Balance Due: <span className="font-mono">${selectedPatientFinancials.totalDue.toLocaleString()}</span></span>
-                            </div>
-                          </>
-                        )}
-                        {selectedPatientFinancials.totalDue === 0 && selectedPatientFinancials.totalInvoiced > 0 && (
-                          <>
-                            <span className="text-gray-300 dark:text-gray-600">·</span>
-                            <div className="flex items-center gap-1.5 text-xs">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                              <span className="text-emerald-600 dark:text-emerald-400 font-bold">Fully Settled</span>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    )}
-
-                    {isLoadingVisits ? (
-                      <div className="flex justify-center py-8">
-                        <svg className="animate-spin h-8 w-8 text-indigo-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                      </div>
-                    ) : patientVisits.length > 0 ? (
-                      <div className="max-h-[500px] overflow-y-auto pr-2 space-y-3 custom-scrollbar">
-                        {patientVisits.map((visit, index) => (
-                          <details key={visit.id} className="group bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-gray-100 dark:border-gray-600 overflow-hidden transition-all duration-200" open={index === 0}>
-                            <summary className="flex justify-between items-center p-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 list-none">
-                              <div className="flex items-center gap-3">
-                                <span className="text-xs font-bold px-2 py-0.5 bg-indigo-50 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded border border-indigo-200 dark:border-indigo-800 shrink-0">
-                                  v{patientVisits.length - index}
-                                </span>
-                                {(visit.amount_paid !== undefined && Number(visit.amount_paid) > 0) && (
-                                  <span className="text-[11px] font-bold px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 rounded border border-emerald-200 dark:border-emerald-800/60 font-mono shrink-0">
-                                    ${Number(visit.amount_paid).toLocaleString()} USD
-                                  </span>
-                                )}
-                                <div className="flex flex-col">
-                                  <span className="text-sm font-bold text-gray-900 dark:text-white">
-                                    {formatDate(visit.visited_at)}
-                                  </span>
-                                  {index === 0 && (
-                                    <span className="text-[10px] text-indigo-600 dark:text-indigo-400 font-bold uppercase tracking-wider">Latest Visit</span>
-                                  )}
-                                </div>
-                                <span className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[150px] md:max-w-[300px]">
-                                  {visit.diagnosis || 'No diagnosis'}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2">
-                                {!isStaffAuth && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setPrintingVisit(visit);
-                                      setShowPrintOptionsModal(true);
-                                    }}
-                                    className="text-[10px] px-2 py-1 bg-green-600 text-white rounded hover:bg-green-700 transition-colors"
-                                  >
-                                    Print
-                                  </button>
-                                )}
-                                {!isStaffAuth && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      setEditingVisit(visit);
-                                      setEditVisitForm(visit);
-                                      setShowEditVisitModal(false);
-                                      setIsEditing(false);
-                                    }}
-                                    className="text-[10px] px-2 py-1 bg-indigo-600 text-white rounded hover:bg-indigo-700 transition-colors"
-                                  >
-                                    Edit
-                                  </button>
-                                )}
-                                {!isStaffAuth && (
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleDeleteVisit(visit.id);
-                                    }}
-                                    disabled={isDeletingVisit === visit.id}
-                                    className="text-[10px] px-2 py-1 bg-red-600 text-white rounded hover:bg-red-700 transition-colors disabled:opacity-50 flex items-center gap-1"
-                                  >
-                                    {isDeletingVisit === visit.id ? (
-                                      <svg className="animate-spin h-3 w-3 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                                      </svg>
-                                    ) : null}
-                                    Delete
-                                  </button>
-                                )}
-                                <svg className="h-4 w-4 text-gray-400 group-open:rotate-180 transition-transform duration-200" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                                </svg>
-                              </div>
-                            </summary>
-                            
-                            <div className="p-4 pt-0 border-t border-gray-100 dark:border-gray-600 grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-                              {visit.diagnosis && (
-                                <div>
-                                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 block uppercase tracking-tighter mb-1">Diagnosis</span>
-                                  <p className="text-sm text-gray-900 dark:text-gray-100 leading-relaxed">{visit.diagnosis}</p>
-                                </div>
-                              )}
-                              {visit.treatment && (
-                                <div>
-                                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 block uppercase tracking-tighter mb-1">Treatment</span>
-                                  <p className="text-sm text-gray-900 dark:text-gray-100 leading-relaxed">{visit.treatment}</p>
-                                </div>
-                              )}
-                              {visit.examination && (
-                                <div className="md:col-span-2">
-                                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 block uppercase tracking-tighter mb-1">Examination</span>
-                                  <p className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-700">{visit.examination}</p>
-                                </div>
-                              )}
-                              {visit.current_treatment && (
-                                <div className="md:col-span-2">
-                                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 block uppercase tracking-tighter mb-1">Current Treatment</span>
-                                  <p className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-700">{visit.current_treatment}</p>
-                                </div>
-                              )}
-                              {visit.prescription && (
-                                <div className="md:col-span-2">
-                                  <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 block uppercase tracking-tighter mb-1">Prescription</span>
-                                  <p className="text-sm text-gray-900 dark:text-gray-100 whitespace-pre-wrap bg-white dark:bg-gray-800 p-2 rounded border border-gray-100 dark:border-gray-700">{visit.prescription}</p>
-                                </div>
-                              )}
-                              {visit.note && (
-                                <div className="md:col-span-2 bg-amber-50 dark:bg-amber-900/10 p-2 rounded border border-amber-100 dark:border-amber-900/30">
-                                  <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400 block uppercase tracking-tighter mb-1">Internal Note</span>
-                                  <p className="text-sm text-gray-700 dark:text-gray-300 italic">{visit.note}</p>
-                                </div>
-                              )}
-                              {visit.amount_paid !== undefined && (
-                                <div className="md:col-span-2 bg-emerald-50 dark:bg-emerald-950/20 p-2.5 rounded border border-emerald-200 dark:border-emerald-800/40">
-                                  <span className="text-[10px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-tighter block mb-1.5">Payment for this Visit</span>
-                                  <div className="flex flex-wrap gap-3">
-                                    {(() => {
-                                      let td: any = {};
-                                      try { td = visit.table_data ? JSON.parse(visit.table_data) : {}; } catch {}
-                                      return (
-                                        <>
-                                          {td.totalCost && Number(td.totalCost) > 0 && (
-                                            <div className="flex flex-col">
-                                              <span className="text-[9px] font-bold text-gray-500 uppercase">Total Cost</span>
-                                              <span className="text-sm font-bold text-gray-900 dark:text-white font-mono">${Number(td.totalCost).toLocaleString()}</span>
-                                            </div>
-                                          )}
-                                          <div className="flex flex-col">
-                                            <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 uppercase">Paid</span>
-                                            <span className="text-sm font-extrabold text-emerald-800 dark:text-emerald-300 font-mono">${Number(visit.amount_paid || 0).toLocaleString()} USD</span>
-                                          </div>
-                                          {td.remainingBalance !== undefined && (
-                                            <div className="flex flex-col">
-                                              <span className="text-[9px] font-bold uppercase text-gray-500">Balance</span>
-                                              <span className={`text-sm font-extrabold font-mono ${Number(td.remainingBalance) > 0 ? 'text-red-700 dark:text-red-300' : 'text-emerald-700 dark:text-emerald-300'}`}>
-                                                {Number(td.remainingBalance) > 0 ? (
-                                                  <span className="flex items-center gap-1"><AlertTriangle className="w-3 h-3" />${Number(td.remainingBalance).toLocaleString()} DUE</span>
-                                                ) : (
-                                                  <span className="flex items-center gap-1"><CheckCircle2 className="w-3 h-3" />Paid</span>
-                                                )}
-                                              </span>
-                                            </div>
-                                          )}
-                                        </>
-                                      );
-                                    })()}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </details>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-center py-6 bg-gray-50 dark:bg-gray-700/30 rounded-lg border border-dashed border-gray-200 dark:border-gray-600">
-                        <p className="text-sm text-gray-500 dark:text-gray-400">No visit history found for this patient.</p>
-                      </div>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div>
-                  <div className="flex justify-between items-center mb-4">
-                    <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Edit Patient</h2>
-                    <button
-                      onClick={() => setIsEditing(false)}
-                      className="flex items-center text-sm px-3 py-1 bg-gray-200 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded hover:bg-gray-300 dark:hover:bg-gray-600"
-                    >
-                      <svg className="h-4 w-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-                      </svg>
-                      Back to View
-                    </button>
-                  </div>
-                  <PatientEditForm
-                    patient={selectedPatient}
-                    onSubmit={handleEditSubmit}
-                    onCancel={() => setIsEditing(false)}
-                    isLoading={isLoading}
-                  />
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex flex-col items-center justify-center h-full p-8 text-center">
-              <svg className="h-16 w-16 text-gray-300 dark:text-gray-600 mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-              </svg>
-              <h3 className="text-lg font-medium text-gray-700 dark:text-gray-300">Select a patient</h3>
-              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                Click on a patient from the list to view details
-              </p>
-            </div>
-          )}
+      {activeTab === 'appointments' && (
+        <div className="animate-in fade-in duration-200">
+          <PatientAppointmentsTab
+            patient={selectedPatient}
+            visits={patientVisits}
+            schedules={toothSchedules}
+            onOpenScheduler={(tId) => {
+              setSchedulerInitialToothId(tId);
+              setShowSchedulerModal(true);
+            }}
+            onLogVisit={handleLogVisit}
+            onGenerateVisitReport={handleGenerateVisitReport}
+          />
         </div>
-      </div>
-    </div>
+      )}
 
-      {/* PDF Visit Selector Modal */}
-      {showPdfModal && selectedPatient && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md">
-            <div className="p-5 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Generate PDF — Select Visit</h3>
-              <button onClick={() => setShowPdfModal(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <div className="p-4 space-y-2 max-h-80 overflow-y-auto">
-              {patientVisits.map((visit, index) => (
-                <button
-                  key={visit.id}
-                  onClick={() => {
-                    handleGenerateVisitReport(selectedPatient, visit);
-                    setShowPdfModal(false);
-                  }}
-                  className="w-full text-left flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700 border border-gray-100 dark:border-gray-600 transition-colors"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-gray-900 dark:text-white">Visit {patientVisits.length - index}</span>
-                      {index === 0 && <span className="text-[10px] px-1.5 py-0.5 bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-300 rounded-full font-bold uppercase">Latest</span>}
-                    </div>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">{formatDate(visit.visited_at)} · {visit.diagnosis || 'No diagnosis'}</p>
-                  </div>
-                  <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-                </button>
-              ))}
-            </div>
+      {activeTab === 'invoices' && (
+        <div className="animate-in fade-in duration-200">
+          <PatientInvoicesTab
+            patient={selectedPatient}
+            visits={patientVisits}
+          />
+        </div>
+      )}
+
+      {activeTab === 'documents' && (
+        <div className="animate-in fade-in duration-200">
+          <PatientDocumentsTab
+            patient={selectedPatient}
+            onOpenInvestigations={() => setShowInvestigationModal(true)}
+            onPrintTreatmentCard={handlePrintTreatmentCard}
+            onGeneratePDF={handleGeneratePDF}
+          />
+        </div>
+      )}
+
+      {activeTab === 'notes' && (
+        <div className="animate-in fade-in duration-200">
+          <PatientNotesTab
+            patient={selectedPatient}
+            onSaveNotes={handleUpdatePatientFields}
+          />
+        </div>
+      )}
+
+      {/* Dental Record Modal */}
+      <DentalRecordModal
+        isOpen={recordModalOpen}
+        initialRecord={editingRecord}
+        onClose={() => {
+          setRecordModalOpen(false);
+          setEditingRecord(null);
+        }}
+        onSave={handleSaveRecord}
+        onDelete={handleDeleteRecord}
+      />
+
+      {/* Edit Patient Core Details Modal */}
+      {isEditingPatient && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-black/50 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="relative w-full max-w-4xl bg-white dark:bg-slate-900 rounded-3xl shadow-2xl border border-slate-200/80 dark:border-slate-800 p-6 sm:p-8 max-h-[90vh] overflow-y-auto">
+            <PatientEditForm
+              patient={selectedPatient}
+              onSubmit={async (updated: Partial<Patient>) => {
+                await editPatient(selectedPatient.id, updated);
+                setIsEditingPatient(false);
+              }}
+              onCancel={() => setIsEditingPatient(false)}
+              isLoading={isLoading}
+            />
           </div>
         </div>
       )}
 
-      {/* Edit Visit Modal */}
-      {editingVisit && selectedPatient && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="p-5 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between sticky top-0 bg-white dark:bg-gray-800 z-10">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Edit Visit</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400">{formatDate(editingVisit.visited_at)} · {selectedPatient.name}</p>
-              </div>
-              <button onClick={() => setEditingVisit(null)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <form className="p-5 space-y-4" onSubmit={async (e) => {
-              e.preventDefault();
-              setIsSavingVisit(true);
-              try {
-                await editVisit(editingVisit.id, editVisitForm);
-                const updated = await getPatientVisits(selectedPatient.id);
-                setPatientVisits(updated);
-                setEditingVisit(null);
-              } catch (err) {
-                console.error(err);
-              } finally {
-                setIsSavingVisit(false);
-              }
-            }}>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {([
-                  'diagnosis',
-                  'treatment',
-                  'current_treatment',
-                  'history',
-                  'past_medical_history',
-                  'drug_history',
-                  'past_surgical_history',
-                  'examination',
-                  'prescription',
-                  'follow_up_date',
-                  'note'
-                ] as (keyof Visit)[]).map((field) => (
-                  <div key={field} className={field === 'current_treatment' || field === 'history' || field === 'note' || field === 'examination' || field === 'prescription' ? 'md:col-span-2' : ''}>
-                    <label className="block text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-tighter mb-1">
-                      {field.replace(/_/g, ' ')}
-                    </label>
-                    <textarea
-                      rows={field === 'current_treatment' || field === 'history' ? 3 : 2}
-                      className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                      value={(editVisitForm[field] as string) || ''}
-                      onChange={(e) => setEditVisitForm(prev => ({ ...prev, [field]: e.target.value }))}
-                    />
-                  </div>
-                ))}
-
-                {/* Payment Suite (USD) — 3 fields */}
-                <div className="md:col-span-2 bg-gray-50 dark:bg-gray-800/50 p-3.5 rounded-xl border border-gray-200 dark:border-gray-700 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider">
-                      Payment / USD
-                    </label>
-                    <span className="text-[10px] bg-gray-200 dark:bg-gray-700 px-2 py-0.5 rounded text-gray-600 dark:text-gray-300 font-semibold">USD Only</span>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[10px] font-semibold text-gray-500 dark:text-gray-400 mb-1">Total Treatment Cost</label>
-                      <div className="relative rounded-lg shadow-sm">
-                        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                          <span className="text-gray-500 font-bold text-sm">$</span>
-                        </div>
-                        <input
-                          type="text" inputMode="decimal"
-                          className="w-full pl-7 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono font-semibold focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500"
-                          value={(editVisitForm as any).totalCost !== undefined ? String((editVisitForm as any).totalCost) : ''}
-                          onChange={(e) => {
-                            const s = e.target.value.replace(/[^0-9.]/g, '');
-                            const f = s.split('.').length > 2 ? `${s.split('.')[0]}.${s.split('.').slice(1).join('')}` : s;
-                            setEditVisitForm(prev => {
-                              const c = parseFloat(f);
-                              const p = parseFloat(String((prev as any).amount_paid || 0));
-                              const rem = (!isNaN(c) && !isNaN(p)) ? Math.max(0, c - p) : undefined;
-                              return { ...prev, totalCost: f as any, remainingBalance: rem !== undefined ? (rem % 1 === 0 ? String(rem) : rem.toFixed(2)) as any : (prev as any).remainingBalance };
-                            });
-                          }}
-                          placeholder="0.00"
-                        />
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-[10px] font-semibold text-gray-500 dark:text-gray-400 mb-1">Amount Paid Now</label>
-                      <div className="relative rounded-lg shadow-sm">
-                        <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-                          <span className="text-gray-500 font-bold text-sm">$</span>
-                        </div>
-                        <input
-                          type="text" inputMode="decimal"
-                          className="w-full pl-7 pr-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 font-mono font-semibold focus:ring-2 focus:ring-gray-400 dark:focus:ring-gray-500"
-                          value={editVisitForm.amount_paid !== undefined ? String(editVisitForm.amount_paid) : ''}
-                          onChange={(e) => {
-                            const sanitized = e.target.value.replace(/[^0-9.]/g, '');
-                            const parts = sanitized.split('.');
-                            const formatted = parts.length > 2 ? `${parts[0]}.${parts.slice(1).join('')}` : sanitized;
-                            setEditVisitForm(prev => {
-                              const c = parseFloat(String((prev as any).totalCost || 0));
-                              const p = parseFloat(formatted);
-                              const rem = (!isNaN(c) && !isNaN(p)) ? Math.max(0, c - p) : undefined;
-                              return { ...prev, amount_paid: formatted as any, remainingBalance: rem !== undefined ? (rem % 1 === 0 ? String(rem) : rem.toFixed(2)) as any : (prev as any).remainingBalance };
-                            });
-                          }}
-                          placeholder="0.00"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                  {/* Remaining Balance — read-only auto-calculated display */}
-                  {(editVisitForm as any).totalCost && editVisitForm.amount_paid !== undefined && (
-                    <div className={`flex items-center justify-between px-3 py-2 rounded-lg border ${
-                      Number((editVisitForm as any).remainingBalance) > 0
-                        ? 'bg-red-50 dark:bg-red-950/30 border-red-200 dark:border-red-800'
-                        : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700'
-                    }`}>
-                      <span className="text-xs font-semibold text-gray-600 dark:text-gray-300">Balance Remaining</span>
-                      <span className={`text-sm font-extrabold font-mono ${
-                        Number((editVisitForm as any).remainingBalance) > 0 ? 'text-red-700 dark:text-red-300' : 'text-gray-800 dark:text-gray-200'
-                      }`}>
-                        {Number((editVisitForm as any).remainingBalance) > 0 ? (
-                          <span className="flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5 text-red-600 dark:text-red-400" />${Number((editVisitForm as any).remainingBalance).toLocaleString()} DUE</span>
-                        ) : (
-                          <span className="flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5 text-gray-500 dark:text-gray-400" />Fully Paid</span>
-                        )}
-                      </span>
-                    </div>
-                  )}
-                </div>
-
-                {/* Investigation Upload — opens real modal */}
-                <div className="md:col-span-2">
-                  <label className="block text-xs font-bold text-gray-500 dark:text-gray-400 uppercase tracking-tighter mb-2 flex items-center gap-2">
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                    </svg>
-                    Investigation Images
-                  </label>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setQuickActionVisit(editingVisit);
-                      setQuickActionPatient(selectedPatient);
-                      setShowQuickInvestigationModal(true);
-                    }}
-                    className="w-full flex items-center justify-center gap-3 p-4 bg-purple-50 dark:bg-purple-900/20 border-2 border-dashed border-purple-200 dark:border-purple-800/50 rounded-xl text-purple-700 dark:text-purple-300 hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors group"
-                  >
-                    <div className="p-2 bg-white dark:bg-gray-700 rounded-full shadow-sm group-hover:shadow-purple-200 dark:group-hover:shadow-none transition-shadow">
-                      <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                      </svg>
-                    </div>
-                    <span className="text-sm font-semibold">Upload Investigation Images</span>
-                    <span className="text-xs text-purple-400 dark:text-purple-500">JPG · PNG · WEBP</span>
-                  </button>
-                </div>
-              </div>
-              <div className="flex justify-end gap-3 mt-2 pt-4 border-t border-gray-100 dark:border-gray-700">
-                <button type="button" onClick={() => setEditingVisit(null)} className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600">Cancel</button>
-                <button type="submit" disabled={isSavingVisit} className="px-4 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
-                  {isSavingVisit && <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>}
-                  Save Visit
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-      {/* Print Options Modal */}
-      {showPrintOptionsModal && printingVisit && selectedPatient && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-sm">
-            <div className="p-5 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-              <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Print Options</h3>
-              <button onClick={() => setShowPrintOptionsModal(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <div className="p-4 space-y-3">
-              <button
-                onClick={() => {
-                  handlePrintGeneric(selectedPatient, printingVisit.prescription || '', 'Prescription Card');
-                  setShowPrintOptionsModal(false);
-                }}
-                className="w-full flex items-center gap-3 p-4 rounded-xl border border-indigo-100 dark:border-indigo-900/30 bg-indigo-50/50 dark:bg-indigo-900/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900/20 transition-colors"
-              >
-                <div className="p-2 bg-indigo-100 dark:bg-indigo-900/30 rounded-lg">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                </div>
-                <span className="font-semibold">Prescription</span>
-              </button>
-              
-              <button
-                onClick={() => {
-                  handlePrintGeneric(selectedPatient, printingVisit.treatment || '', 'Treatment Card');
-                  setShowPrintOptionsModal(false);
-                }}
-                className="w-full flex items-center gap-3 p-4 rounded-xl border border-green-100 dark:border-green-900/30 bg-green-50/50 dark:bg-green-900/10 text-green-700 dark:text-green-300 hover:bg-green-100 dark:hover:bg-green-900/20 transition-colors"
-              >
-                <div className="p-2 bg-green-100 dark:bg-green-900/30 rounded-lg">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" /></svg>
-                </div>
-                <span className="font-semibold">Treatment</span>
-              </button>
-
-              <button
-                onClick={() => {
-                  handlePrintGeneric(selectedPatient, printingVisit.current_treatment || '', 'Current Treatment Card');
-                  setShowPrintOptionsModal(false);
-                }}
-                className="w-full flex items-center gap-3 p-4 rounded-xl border border-blue-100 dark:border-blue-900/30 bg-blue-50/50 dark:bg-blue-900/10 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/20 transition-colors"
-              >
-                <div className="p-2 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
-                  <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
-                </div>
-                <span className="font-semibold">Current Treatment</span>
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Quick Examination Modal */}
-      {showQuickExamModal && quickActionVisit && quickActionPatient && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md">
-            <div className="p-5 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Quick Examination</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400">{quickActionPatient.name} · Latest Visit</p>
-              </div>
-              <button onClick={() => setShowQuickExamModal(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <form className="p-5 space-y-4" onSubmit={async (e) => {
-              e.preventDefault();
-              setIsSavingVisit(true);
-              try {
-                await editVisit(quickActionVisit.id, editVisitForm);
-                setShowQuickExamModal(false);
-                if (selectedPatient?.id === quickActionPatient.id) {
-                   const updated = await getPatientVisits(selectedPatient.id);
-                   setPatientVisits(updated);
-                }
-              } catch (err) {
-                console.error(err);
-              } finally {
-                setIsSavingVisit(false);
-              }
-            }}>
-              <div>
-                <label className="block text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-tighter mb-1">Examination Results</label>
-                <textarea
-                  rows={6}
-                  autoFocus
-                  className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                  value={(editVisitForm.examination as string) || ''}
-                  onChange={(e) => setEditVisitForm(prev => ({ ...prev, examination: e.target.value }))}
-                />
-              </div>
-              <div className="flex justify-end gap-3 pt-2">
-                <button type="button" onClick={() => setShowQuickExamModal(false)} className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg">Cancel</button>
-                <button type="submit" disabled={isSavingVisit} className="px-6 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
-                  {isSavingVisit && <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>}
-                  Save Exam
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Quick Prescription Modal */}
-      {showQuickPrescriptionModal && quickActionVisit && quickActionPatient && (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg">
-            <div className="p-5 border-b border-gray-100 dark:border-gray-700 flex items-center justify-between">
-              <div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Quick Prescription</h3>
-                <p className="text-xs text-gray-500 dark:text-gray-400">{quickActionPatient.name} · Latest Visit</p>
-              </div>
-              <button onClick={() => setShowQuickPrescriptionModal(false)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
-                <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-              </button>
-            </div>
-            <form className="p-5 space-y-4" onSubmit={async (e) => {
-              e.preventDefault();
-              setIsSavingVisit(true);
-              try {
-                await editVisit(quickActionVisit.id, editVisitForm);
-                setShowQuickPrescriptionModal(false);
-                if (selectedPatient?.id === quickActionPatient.id) {
-                   const updated = await getPatientVisits(selectedPatient.id);
-                   setPatientVisits(updated);
-                }
-              } catch (err) {
-                console.error(err);
-              } finally {
-                setIsSavingVisit(false);
-              }
-            }}>
-              <div>
-                <label className="block text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-tighter mb-1">Prescription</label>
-                <textarea
-                  rows={8}
-                  autoFocus
-                  className="w-full border border-gray-200 dark:border-gray-600 rounded-lg px-3 py-2 text-sm bg-white dark:bg-gray-700 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-500 focus:border-transparent resize-none"
-                  value={(editVisitForm.prescription as string) || ''}
-                  onChange={(e) => setEditVisitForm(prev => ({ ...prev, prescription: e.target.value }))}
-                />
-              </div>
-              <div className="flex justify-between items-center pt-2">
-                <div className="flex gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handlePrintGeneric(quickActionPatient, editVisitForm.prescription || '', 'Prescription Card')}
-                    className="px-3 py-2 text-xs font-medium bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300 rounded-lg border border-green-100 dark:border-green-900/30 hover:bg-green-100 transition-colors flex items-center gap-1"
-                  >
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
-                    Print Rx
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handlePrintGeneric(quickActionPatient, editVisitForm.treatment || '', 'Treatment Card')}
-                    className="px-3 py-2 text-xs font-medium bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300 rounded-lg border border-blue-100 dark:border-blue-900/30 hover:bg-blue-100 transition-colors flex items-center gap-1"
-                  >
-                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
-                    Print Treatment
-                  </button>
-                </div>
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => setShowQuickPrescriptionModal(false)} className="px-4 py-2 text-sm text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-700 rounded-lg">Cancel</button>
-                  <button type="submit" disabled={isSavingVisit} className="px-6 py-2 text-sm text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2">
-                    {isSavingVisit && <svg className="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>}
-                    Save Rx
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Quick Investigation Modal */}
-      {showQuickInvestigationModal && quickActionVisit && quickActionPatient && (
-        <InvestigationModal
-          patient={quickActionPatient}
-          visit={quickActionVisit}
-          onClose={() => setShowQuickInvestigationModal(false)}
-        />
-      )}
-
-      {/* ── TOOTH PROCEDURE SCHEDULER MODAL ── */}
-      {showSchedulerModal && schedulerPatient && (
+      {/* Tooth Scheduler Modal */}
+      {showSchedulerModal && (
         <ToothSchedulerModal
           isOpen={showSchedulerModal}
           onClose={() => {
             setShowSchedulerModal(false);
-            setSchedulerPatient(null);
+            setSchedulerInitialToothId(undefined);
           }}
-          patient={schedulerPatient}
+          patient={selectedPatient}
           initialToothId={schedulerInitialToothId}
-          onScheduled={async (newSch) => {
+          onScheduled={async () => {
             await refreshPatients();
-            if (selectedPatient && selectedPatient.id === schedulerPatient.id) {
-              try {
-                const cur = selectedPatient.tableData ? JSON.parse(selectedPatient.tableData) : {};
-                const list = cur.scheduledProcedures || [];
-                setSelectedPatient({
-                  ...selectedPatient,
-                  tableData: JSON.stringify({
-                    ...cur,
-                    scheduledProcedures: [...list, newSch]
-                  })
-                });
-              } catch {
-                // ignore
-              }
-            }
           }}
         />
       )}
-    </>
+
+      {/* Investigations Modal */}
+      {showInvestigationModal && (
+        <InvestigationModal
+          patient={selectedPatient}
+          visit={patientVisits[0] || ({ id: 'default', patient_id: selectedPatient.id, visited_at: new Date().toISOString() } as Visit)}
+          onClose={() => setShowInvestigationModal(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+export default function PatientsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center min-h-96">
+          <div className="animate-spin size-8 border-3 border-[#008294] border-t-transparent rounded-full" />
+        </div>
+      }
+    >
+      <PatientsContent />
+    </Suspense>
   );
 }
