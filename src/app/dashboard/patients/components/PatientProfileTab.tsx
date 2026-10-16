@@ -12,14 +12,16 @@ import {
   HeartPulse,
   Edit2,
   Clock,
+  Trash2,
 } from 'lucide-react';
 
 interface PatientProfileTabProps {
   patient: Patient;
   onEdit: () => void;
+  onDelete?: () => void;
 }
 
-export default function PatientProfileTab({ patient, onEdit }: PatientProfileTabProps) {
+export default function PatientProfileTab({ patient, onEdit, onDelete }: PatientProfileTabProps) {
   const calculateAge = (dob: string): number | string => {
     if (!dob) return 'N/A';
     if (/^\d{1,3}$/.test(dob.trim())) return parseInt(dob.trim(), 10);
@@ -158,6 +160,28 @@ export default function PatientProfileTab({ patient, onEdit }: PatientProfileTab
           </div>
         </div>
       </div>
+
+      {/* Danger Zone: Delete Patient */}
+      {onDelete && (
+        <div className="bg-rose-50/50 dark:bg-rose-950/20 border border-rose-200/70 dark:border-rose-900/50 rounded-2xl p-5 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h4 className="text-sm font-bold text-rose-900 dark:text-rose-200 flex items-center gap-2">
+              <Trash2 className="size-4 text-rose-600" />
+              <span>Delete Patient Record</span>
+            </h4>
+            <p className="text-xs text-rose-700/80 dark:text-rose-300/70 mt-1">
+              Permanently removes {patient.name} and all associated dental charts, clinical visits, appointments, and billing invoices.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 active:bg-rose-800 text-white text-xs font-bold shadow-xs transition-colors cursor-pointer shrink-0"
+          >
+            Delete Patient
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -178,17 +178,32 @@ export default function PatientDirectoryView({
                     </td>
 
                     <td className="py-3.5 px-6 text-right">
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onSelectPatient(p);
-                        }}
-                        className="px-3 py-1.5 rounded-lg bg-slate-100 group-hover:bg-[#008294] text-slate-700 group-hover:text-white dark:bg-slate-800 dark:text-slate-300 text-xs font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <span>Open Record</span>
-                        <ChevronRight className="size-3.5" />
-                      </button>
+                      <div className="flex items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelectPatient(p);
+                          }}
+                          className="px-3 py-1.5 rounded-lg bg-slate-100 group-hover:bg-[#008294] text-slate-700 group-hover:text-white dark:bg-slate-800 dark:text-slate-300 text-xs font-semibold transition-colors inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>Open Record</span>
+                          <ChevronRight className="size-3.5" />
+                        </button>
+                        {onDeletePatient && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onDeletePatient(p.id);
+                            }}
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg transition-colors cursor-pointer"
+                            title="Delete Patient Record"
+                          >
+                            <Trash2 className="size-4" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))

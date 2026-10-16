@@ -16,6 +16,12 @@ export default function PatientNotesTab({ patient, onSaveNotes }: PatientNotesTa
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
 
+  React.useEffect(() => {
+    setNote(patient.note || '');
+    setExamination(patient.examination || '');
+    setPrescription(patient.prescription || '');
+  }, [patient.id, patient.note, patient.examination, patient.prescription]);
+
   const handleSave = async () => {
     setIsSaving(true);
     try {
@@ -26,6 +32,9 @@ export default function PatientNotesTab({ patient, onSaveNotes }: PatientNotesTa
       });
       setIsSaved(true);
       setTimeout(() => setIsSaved(false), 2500);
+    } catch (err: any) {
+      console.error('Save notes error:', err);
+      alert(`Failed to save notes: ${err?.message || 'Unknown error'}`);
     } finally {
       setIsSaving(false);
     }

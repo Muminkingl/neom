@@ -428,8 +428,8 @@ function ToothRow({ arch, fdiIds, univLabels, palmerLabels, teethData, scheduled
             {/* Number label — top for upper, bottom for lower */}
             {arch === 'upper' && (
               <span className={`text-[9px] sm:text-[10px] font-bold font-mono leading-none mb-0.5 transition-colors ${
-                hoveredId === fdiId ? 'text-indigo-400' :
-                selectedId === fdiId ? 'text-indigo-300' : 'text-slate-400'
+                hoveredId === fdiId ? 'text-[#008294] dark:text-teal-400 font-extrabold' :
+                selectedId === fdiId ? 'text-teal-700 dark:text-teal-300 font-bold' : 'text-gray-500 dark:text-gray-400'
               }`}>
                 {label}
               </span>
@@ -461,8 +461,8 @@ function ToothRow({ arch, fdiIds, univLabels, palmerLabels, teethData, scheduled
             {/* Number label — bottom for lower */}
             {arch === 'lower' && (
               <span className={`text-[9px] sm:text-[10px] font-bold font-mono leading-none mt-0.5 transition-colors ${
-                hoveredId === fdiId ? 'text-indigo-400' :
-                selectedId === fdiId ? 'text-indigo-300' : 'text-slate-400'
+                hoveredId === fdiId ? 'text-[#008294] dark:text-teal-400 font-extrabold' :
+                selectedId === fdiId ? 'text-teal-700 dark:text-teal-300 font-bold' : 'text-gray-500 dark:text-gray-400'
               }`}>
                 {label}
               </span>
@@ -502,24 +502,24 @@ export function ToothInspectorModal({ tooth, onClose, onSave, onScheduleTooth, z
   };
 
   return (
-    <div className={`fixed inset-0 ${zIndex || 'z-50'} flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fadeIn`}>
-      <div className="bg-gray-950 border border-gray-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-scaleUp" onClick={e => e.stopPropagation()}>
+    <div className={`fixed inset-0 ${zIndex || 'z-50'} flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fadeIn`}>
+      <div className="bg-white dark:bg-[#131b1e] border border-gray-200 dark:border-gray-800 rounded-[24px] w-full max-w-md overflow-hidden shadow-2xl animate-scaleUp" onClick={e => e.stopPropagation()}>
         {/* Header */}
-        <div className="p-4 bg-gradient-to-r from-gray-900 via-gray-900 to-indigo-950/40 border-b border-gray-800 flex items-center justify-between">
+        <div className="p-4 bg-gray-50/80 dark:bg-[#162024] border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl bg-indigo-600 flex items-center justify-center shadow-lg border border-indigo-400/40">
-              <span className="font-mono text-xl font-black text-white">{tooth.palmer}</span>
+            <div className="w-12 h-12 rounded-2xl bg-[#008294] flex items-center justify-center shadow-xs">
+              <span className="font-mono text-xl font-bold text-white">{tooth.palmer}</span>
             </div>
             <div>
-              <h3 className="text-sm font-bold text-white leading-snug">{tooth.name}</h3>
-              <p className="text-[11px] text-gray-400 font-mono flex items-center gap-1.5 mt-0.5">
+              <h3 className="text-sm font-bold text-gray-900 dark:text-white leading-snug">{tooth.name}</h3>
+              <p className="text-[11px] text-gray-500 dark:text-gray-400 font-mono flex items-center gap-1.5 mt-0.5">
                 <span>FDI #{tooth.id}</span><span>•</span>
-                <span className="text-indigo-300 font-semibold">Quadrant: {tooth.palmerQuadrant}</span>
+                <span className="text-teal-700 dark:text-teal-400 font-semibold">Quadrant: {tooth.palmerQuadrant}</span>
                 <span>•</span><span className="capitalize">{tooth.dentition}</span>
               </p>
             </div>
           </div>
-          <button type="button" onClick={onClose} className="text-gray-400 hover:text-white p-1 rounded-lg hover:bg-gray-800 transition-colors">
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-700 dark:hover:text-white p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors cursor-pointer">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
             </svg>
@@ -537,10 +537,10 @@ export function ToothInspectorModal({ tooth, onClose, onSave, onScheduleTooth, z
                 const isSelected = currentCondition === condKey;
                 return (
                   <button key={condKey} type="button" onClick={() => setCurrentCondition(condKey)}
-                    className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-semibold text-left transition-all ${
-                      isSelected ? 'bg-indigo-600/30 border-indigo-500 text-white shadow-md ring-1 ring-indigo-400 font-bold' : 'border-gray-800 bg-gray-900/60 text-gray-300 hover:bg-gray-800/80 hover:text-white'
+                    className={`flex items-center gap-2 p-2.5 rounded-xl border text-xs font-semibold text-left transition-all cursor-pointer ${
+                      isSelected ? 'bg-teal-500/10 border-teal-500 text-[#008294] dark:text-teal-300 shadow-xs ring-1 ring-teal-400/50 font-bold' : 'border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-[#162024] text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800'
                     }`}>
-                    <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm" style={{ backgroundColor: conf.dotColor }} />
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: conf.dotColor }} />
                     <span>{conf.label}</span>
                   </button>
                 );
@@ -550,8 +550,8 @@ export function ToothInspectorModal({ tooth, onClose, onSave, onScheduleTooth, z
 
           {/* Surface Multi-select */}
           {(currentCondition === 'caries' || currentCondition === 'filled' || currentCondition === 'fracture') && (
-            <div className="bg-gray-900/50 p-3.5 rounded-xl border border-gray-800">
-              <label className="block text-[11px] font-bold text-indigo-300 uppercase tracking-wider mb-2">Surfaces Involved</label>
+            <div className="bg-gray-50/80 dark:bg-[#162024] p-3.5 rounded-xl border border-gray-200 dark:border-gray-800">
+              <label className="block text-[11px] font-bold text-teal-800 dark:text-teal-400 uppercase tracking-wider mb-2">Surfaces Involved</label>
               <div className="flex flex-wrap gap-1.5">
                 {[
                   { id: 'O', label: 'Occlusal/Incisal (O)' }, { id: 'M', label: 'Mesial (M)' },
@@ -561,7 +561,7 @@ export function ToothInspectorModal({ tooth, onClose, onSave, onScheduleTooth, z
                   const active = currentSurfaces.includes(surf.id as ToothSurface);
                   return (
                     <button key={surf.id} type="button" onClick={() => toggleSurface(surf.id as ToothSurface)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${active ? 'bg-indigo-600 text-white shadow-md' : 'bg-gray-800/80 text-gray-400 border border-gray-700 hover:text-gray-200'}`}>
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${active ? 'bg-[#008294] text-white shadow-xs' : 'bg-white dark:bg-[#1e282c] text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700 hover:text-gray-900 dark:hover:text-white'}`}>
                       {surf.label}
                     </button>
                   );
@@ -573,7 +573,7 @@ export function ToothInspectorModal({ tooth, onClose, onSave, onScheduleTooth, z
           {/* Schedule Button */}
           {onScheduleTooth && (
             <button type="button" onClick={() => { onSave({ ...tooth, condition: currentCondition, surfaces: currentSurfaces, notes: currentNotes.trim() }); onScheduleTooth(tooth); onClose(); }}
-              className="w-full py-2.5 px-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 shadow-sm transition-colors cursor-pointer">
+              className="w-full py-2.5 px-3 bg-[#008294] hover:bg-[#006e7d] text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer">
               <Calendar className="w-4 h-4 text-white" />
               <span>Schedule Next Procedure for Tooth #{tooth.id} ({tooth.palmer})</span>
             </button>
@@ -584,17 +584,17 @@ export function ToothInspectorModal({ tooth, onClose, onSave, onScheduleTooth, z
             <label htmlFor="modal-tooth-notes" className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-1.5">Tooth Information & Treatment Notes</label>
             <textarea id="modal-tooth-notes" rows={3} value={currentNotes} onChange={e => setCurrentNotes(e.target.value)}
               placeholder={`Add findings or treatment notes for tooth ${tooth.palmer}...`}
-              className="w-full px-3.5 py-2.5 bg-gray-900/80 border border-gray-700/80 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-white text-xs placeholder-gray-500" />
+              className="w-full px-3.5 py-2.5 bg-gray-50 dark:bg-[#162024] border border-gray-200 dark:border-gray-800 rounded-xl focus:ring-2 focus:ring-teal-500 text-gray-900 dark:text-white text-xs placeholder-gray-400 outline-none" />
           </div>
         </div>
 
         {/* Footer */}
-        <div className="p-4 bg-gray-900/80 border-t border-gray-800 flex items-center justify-between">
+        <div className="p-4 bg-gray-50/80 dark:bg-[#162024] border-t border-gray-100 dark:border-gray-800 flex items-center justify-between">
           <button type="button" onClick={() => { setCurrentCondition('sound'); setCurrentSurfaces([]); setCurrentNotes(''); }}
-            className="text-xs text-rose-400 hover:text-rose-300 font-semibold transition-colors">Clear Tooth</button>
+            className="text-xs text-rose-500 hover:text-rose-600 font-semibold transition-colors cursor-pointer">Clear Tooth</button>
           <div className="flex gap-2.5">
-            <button type="button" onClick={onClose} className="px-4 py-2 text-xs font-semibold text-gray-400 hover:text-white bg-gray-800 rounded-xl transition-colors">Cancel</button>
-            <button type="button" onClick={handleSave} className="px-6 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-500 rounded-xl shadow-lg transition-all">Save Tooth</button>
+            <button type="button" onClick={onClose} className="px-4 py-2 text-xs font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-white bg-gray-100 dark:bg-gray-800 rounded-xl transition-colors cursor-pointer">Cancel</button>
+            <button type="button" onClick={handleSave} className="px-6 py-2 text-xs font-bold text-white bg-[#008294] hover:bg-[#006e7d] rounded-xl shadow-xs transition-all cursor-pointer">Save Tooth</button>
           </div>
         </div>
       </div>
@@ -649,19 +649,19 @@ export function ClinicalOdontogram({ teethData, scheduledToothIds, dentitionMode
   const scheduledCount = scheduledToothIds.size;
 
   return (
-    <div className="w-full bg-[#0f1117] rounded-3xl border border-gray-800 shadow-lg overflow-hidden select-none">
+    <div className="w-full bg-white dark:bg-[#111719] rounded-[24px] border border-gray-200/80 dark:border-gray-800 shadow-xs overflow-hidden select-none">
       {/* Header */}
-      <div className="px-4 py-3 border-b border-gray-800 bg-[#0f1117] flex flex-wrap items-center justify-between gap-2">
+      <div className="px-4 py-3.5 border-b border-gray-100 dark:border-gray-800 bg-gray-50/70 dark:bg-[#141b1e] flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2 flex-wrap">
-          <ToothIcon className="w-4 h-4 text-indigo-500" />
-          <span className="text-sm font-bold text-white">Dentition Chart</span>
+          <ToothIcon className="w-4 h-4 text-[#008294]" />
+          <span className="text-sm font-bold text-gray-900 dark:text-white">Dentition Chart</span>
           {treatedCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-teal-500/10 text-teal-800 dark:text-teal-300 border border-teal-500/20">
               {treatedCount} charted
             </span>
           )}
           {scheduledCount > 0 && (
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30 flex items-center gap-1">
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-500/10 text-blue-700 dark:text-blue-300 border border-blue-500/20 flex items-center gap-1">
               <Calendar className="w-2.5 h-2.5" /> {scheduledCount} scheduled
             </span>
           )}
@@ -671,20 +671,20 @@ export function ClinicalOdontogram({ teethData, scheduledToothIds, dentitionMode
         <div className="flex items-center gap-1.5 flex-wrap text-xs">
           {/* Dentition toggle */}
           {onDentitionModeChange && (
-            <div className="flex items-center bg-gray-900 p-0.5 rounded-lg border border-gray-700">
+            <div className="flex items-center bg-gray-100 dark:bg-[#1a2327] p-1 rounded-xl border border-gray-200/80 dark:border-gray-800">
               {(['permanent', 'deciduous'] as const).map(m => (
                 <button key={m} type="button" onClick={() => onDentitionModeChange(m)}
-                  className={`px-2.5 py-1 rounded-md font-semibold transition-all cursor-pointer ${dentitionMode === m ? 'bg-indigo-600 text-white shadow-xs' : 'text-gray-400 hover:text-white'}`}>
+                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${dentitionMode === m ? 'bg-[#008294] text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}>
                   {m === 'permanent' ? 'Adult (32)' : 'Pediatric (20)'}
                 </button>
               ))}
             </div>
           )}
           {/* Notation toggle */}
-          <div className="flex items-center bg-gray-900 p-0.5 rounded-lg border border-gray-700">
+          <div className="flex items-center bg-gray-100 dark:bg-[#1a2327] p-1 rounded-xl border border-gray-200/80 dark:border-gray-800">
             {(['Universal', 'Palmer', 'FDI'] as const).map(n => (
               <button key={n} type="button" onClick={() => setNotation(n)}
-                className={`px-2 py-1 rounded-md font-mono font-bold transition-all cursor-pointer ${notation === n ? 'bg-indigo-600 text-white shadow-xs' : 'text-gray-400 hover:text-white'}`}>
+                className={`px-2 py-1 rounded-lg font-mono text-xs font-bold transition-all cursor-pointer ${notation === n ? 'bg-[#008294] text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}>
                 {n === 'Universal' ? 'Univ' : n}
               </button>
             ))}
@@ -693,12 +693,12 @@ export function ClinicalOdontogram({ teethData, scheduledToothIds, dentitionMode
       </div>
 
       {/* Chart area */}
-      <div className="px-3 sm:px-5 py-4 bg-[#090b11] space-y-2">
+      <div className="px-3 sm:px-5 py-5 bg-[#F9FBFC] dark:bg-[#0c1214] space-y-2.5">
         {/* Quadrant labels */}
         <div className="flex items-center justify-between px-1 mb-1">
-          <span className="text-[9px] font-mono font-bold text-gray-600 tracking-wider">PATIENT'S RIGHT</span>
-          <span className="text-[9px] font-mono font-bold text-gray-600 tracking-wider">↑ MAXILLARY (UPPER) ↑</span>
-          <span className="text-[9px] font-mono font-bold text-gray-600 tracking-wider">PATIENT'S LEFT</span>
+          <span className="text-[10px] font-mono font-bold text-gray-400 dark:text-gray-500 tracking-wider">PATIENT&apos;S RIGHT</span>
+          <span className="text-[10px] font-mono font-bold text-gray-400 dark:text-gray-500 tracking-wider">↑ MAXILLARY (UPPER) ↑</span>
+          <span className="text-[10px] font-mono font-bold text-gray-400 dark:text-gray-500 tracking-wider">PATIENT&apos;S LEFT</span>
         </div>
 
         {/* Upper arch row */}
@@ -719,9 +719,9 @@ export function ClinicalOdontogram({ teethData, scheduledToothIds, dentitionMode
 
         {/* Midline divider */}
         <div className="flex items-center gap-2 py-1">
-          <div className="flex-1 h-px bg-slate-300 dark:bg-gray-700" />
-          <span className="text-[9px] font-mono text-slate-400 dark:text-gray-600 font-bold shrink-0">MIDLINE</span>
-          <div className="flex-1 h-px bg-slate-300 dark:bg-gray-700" />
+          <div className="flex-1 h-px bg-gray-200 dark:bg-gray-800" />
+          <span className="text-[10px] font-mono text-gray-400 dark:text-gray-500 font-bold shrink-0">MIDLINE</span>
+          <div className="flex-1 h-px bg-gray-200 dark:bg-gray-800" />
         </div>
 
         {/* Lower arch row */}
@@ -741,33 +741,33 @@ export function ClinicalOdontogram({ teethData, scheduledToothIds, dentitionMode
         />
 
         <div className="flex items-center justify-between px-1 mt-1">
-          <span className="text-[9px] font-mono font-bold text-slate-400 dark:text-gray-600 tracking-wider">PATIENT'S RIGHT</span>
-          <span className="text-[9px] font-mono font-bold text-slate-400 dark:text-gray-600 tracking-wider">↓ MANDIBULAR (LOWER) ↓</span>
-          <span className="text-[9px] font-mono font-bold text-slate-400 dark:text-gray-600 tracking-wider">PATIENT'S LEFT</span>
+          <span className="text-[10px] font-mono font-bold text-gray-400 dark:text-gray-500 tracking-wider">PATIENT&apos;S RIGHT</span>
+          <span className="text-[10px] font-mono font-bold text-gray-400 dark:text-gray-500 tracking-wider">↓ MANDIBULAR (LOWER) ↓</span>
+          <span className="text-[10px] font-mono font-bold text-gray-400 dark:text-gray-500 tracking-wider">PATIENT&apos;S LEFT</span>
         </div>
       </div>
 
       {/* HUD info bar */}
-      <div className="px-4 py-2.5 border-t border-gray-800 bg-gray-900/80 min-h-[44px] flex items-center">
+      <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800 bg-white dark:bg-[#111719] min-h-[48px] flex items-center">
         {hoveredCoord ? (
           <div className="flex items-center justify-between w-full gap-2 flex-wrap">
             <div className="flex items-center gap-2.5">
-              <div className="px-2.5 py-1 rounded-lg bg-indigo-600 font-mono text-sm font-black text-white shadow-sm">{hoveredCoord.palmer}</div>
-              <div className="px-2 py-1 rounded-md bg-gray-800 font-mono text-xs font-bold text-gray-300">FDI #{hoveredCoord.id}</div>
+              <div className="px-2.5 py-1 rounded-lg bg-[#008294] font-mono text-sm font-bold text-white shadow-xs">{hoveredCoord.palmer}</div>
+              <div className="px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-800 font-mono text-xs font-bold text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700">FDI #{hoveredCoord.id}</div>
               <div>
-                <div className="text-xs font-bold text-white leading-snug">{hoveredCoord.name}</div>
-                <div className="text-[10px] text-gray-400">{hoveredCoord.palmerQuadrant} · <span className="capitalize">{hoveredCoord.arch}</span></div>
+                <div className="text-xs font-bold text-gray-900 dark:text-white leading-snug">{hoveredCoord.name}</div>
+                <div className="text-[10px] text-gray-500 dark:text-gray-400">{hoveredCoord.palmerQuadrant} · <span className="capitalize">{hoveredCoord.arch}</span></div>
               </div>
             </div>
             <span className="px-2.5 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5"
-              style={{ backgroundColor: `${CONDITION_CONFIG[hoveredCondition].dotColor}20`, borderColor: `${CONDITION_CONFIG[hoveredCondition].dotColor}50`, color: CONDITION_CONFIG[hoveredCondition].dotColor }}>
+              style={{ backgroundColor: `${CONDITION_CONFIG[hoveredCondition].dotColor}15`, borderColor: `${CONDITION_CONFIG[hoveredCondition].dotColor}40`, color: CONDITION_CONFIG[hoveredCondition].dotColor }}>
               <span className="w-2 h-2 rounded-full" style={{ backgroundColor: CONDITION_CONFIG[hoveredCondition].dotColor }} />
               {CONDITION_CONFIG[hoveredCondition].label}
             </span>
           </div>
         ) : (
-          <div className="flex items-center gap-2 text-xs text-gray-500">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+          <div className="flex items-center gap-2 text-xs text-gray-400 dark:text-gray-500">
+            <span className="w-2 h-2 rounded-full bg-teal-500 animate-pulse" />
             <span>Hover over a tooth to view notation · {readOnly ? 'Read-only chart' : 'Click any tooth to record condition or schedule procedure'}</span>
           </div>
         )}

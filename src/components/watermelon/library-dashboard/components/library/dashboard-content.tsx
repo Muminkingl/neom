@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { CirculationChart } from './circulation-chart';
 import { CollectionDonutChart } from './collection-donut-chart';
@@ -20,11 +20,6 @@ import {
 } from './icons';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import {
-  collectionOverview,
-  intelligenceCards,
-  metrics as fallbackMetrics,
-} from '../../data';
 import { cn } from '@/lib/utils';
 import { usePatients } from '@/app/context/PatientContext';
 import { Calendar, User, UserCheck, Stethoscope, Clock, ShieldCheck, ChevronRight } from 'lucide-react';
@@ -37,44 +32,145 @@ const quickActions = [
   { label: 'Clinic Store & Supplies', href: '/dashboard/store', icon: CatalogIcon },
 ];
 
+function extractRealTreatments(patients: any[]) {
+  const counts: Record<string, number> = {
+    'Restorative & Fillings': 0,
+    'Endodontics & RCT': 0,
+    'Orthodontics': 0,
+    'Implants & Surgery': 0,
+    'Periodontics & Cleaning': 0,
+    'Prosthetics & Crowns': 0,
+    'Consultations & Exams': 0,
+  };
+
+  const classifyTreatment = (text: string): string => {
+    const t = (text || '').toLowerCase();
+    if (t.includes('implant') || t.includes('extract') || t.includes('surg') || t.includes('bone')) {
+      return 'Implants & Surgery';
+    }
+    if (t.includes('ortho') || t.includes('brace') || t.includes('align') || t.includes('wire')) {
+      return 'Orthodontics';
+    }
+    if (t.includes('rct') || t.includes('root canal') || t.includes('pulp') || t.includes('endo')) {
+      return 'Endodontics & RCT';
+    }
+    if (t.includes('clean') || t.includes('scal') || t.includes('hygiene') || t.includes('perio') || t.includes('polish')) {
+      return 'Periodontics & Cleaning';
+    }
+    if (t.includes('crown') || t.includes('bridge') || t.includes('veneer') || t.includes('denture') || t.includes('prostho')) {
+      return 'Prosthetics & Crowns';
+    }
+    if (t.includes('fill') || t.includes('decay') || t.includes('caries') || t.includes('composite') || t.includes('restor')) {
+      return 'Restorative & Fillings';
+    }
+    return 'Consultations & Exams';
+  };
+
+  patients.forEach((patient) => {
+    let hasToothTreatment = false;
+
+    // Check tableData for tooth-specific treatments
+    if (patient.tableData) {
+      try {
+        const parsed = typeof patient.tableData === 'string' ? JSON.parse(patient.tableData) : patient.tableData;
+        if (parsed?.teeth && typeof parsed.teeth === 'object') {
+          Object.values(parsed.teeth).forEach((tooth: any) => {
+            if (tooth?.treatment && typeof tooth.treatment === 'string' && tooth.treatment.trim()) {
+              counts[classifyTreatment(tooth.treatment)]++;
+              hasToothTreatment = true;
+            } else if (tooth?.condition && tooth.condition !== 'sound') {
+              if (tooth.condition === 'decay') counts['Restorative & Fillings']++;
+              else if (tooth.condition === 'rct') counts['Endodontics & RCT']++;
+              else if (tooth.condition === 'implant') counts['Implants & Surgery']++;
+              else if (tooth.condition === 'crown') counts['Prosthetics & Crowns']++;
+              else if (tooth.condition === 'missing') counts['Implants & Surgery']++;
+              hasToothTreatment = true;
+            }
+          });
+        }
+        if (Array.isArray(parsed?.scheduledProcedures)) {
+          parsed.scheduledProcedures.forEach((sp: any) => {
+            if (sp.procedure) {
+              counts[classifyTreatment(sp.procedure)]++;
+              hasToothTreatment = true;
+            }
+          });
+        }
+      } catch {}
+    }
+
+    if (!hasToothTreatment) {
+      if (patient.treatment && patient.treatment.trim()) {
+        counts[classifyTreatment(patient.treatment)]++;
+      } else if (patient.diagnosis && patient.diagnosis.trim()) {
+        counts[classifyTreatment(patient.diagnosis)]++;
+      } else if (patient.currentTreatment && patient.currentTreatment.trim()) {
+        counts[classifyTreatment(patient.currentTreatment)]++;
+      } else {
+        counts['Consultations & Exams']++;
+      }
+    }
+  });
+
+  return counts;
+}
+
 export function DashboardContent() {
-  const { patients } = usePatients();
+  const { patients, appointments } = usePatients();
 
   // Dynamic metrics from patients context
   const totalPatientsCount = patients.length;
   const recentRegisteredCount = patients.filter((p) => {
     const createdDate = new Date(p.createdAt);
-    const lastWeek = new Date();
-    lastWeek.setDate(lastWeek.getDate() - 7);
-    return createdDate > lastWeek;
+    const last30Days = new Date();
+    last30Days.setDate(last30Days.getDate() - 30);
+    return createdDate > last30Days;
   }).length;
+
+  const activeAppointmentsCount = appointments.filter(
+    (a) => a.status === 'Scheduled' || a.status === 'Arrived'
+  ).length;
+
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todayAppointmentsCount = appointments.filter(
+    (a) => a.appointmentDate === todayStr
+  ).length;
+
+  const realTreatments = useMemo(() => extractRealTreatments(patients), [patients]);
+  const totalTreatmentsCount: number = useMemo(() => {
+    return Object.values(realTreatments).reduce((sum: number, count: number) => sum + count, 0);
+  }, [realTreatments]);
+
+  const completedVisitsCount = appointments.filter(
+    (a) => a.status === 'Completed'
+  ).length;
 
   const dynamicMetrics = [
     {
       label: 'Total Patients',
-      value: totalPatientsCount > 0 ? totalPatientsCount.toLocaleString() : '1,284',
-      note: `+${recentRegisteredCount > 0 ? recentRegisteredCount : 34} this month`,
+      value: totalPatientsCount.toLocaleString(),
+      note: `+${recentRegisteredCount} this month`,
       icon: ToothIcon,
       iconClassName: 'text-[#008294]',
     },
     {
       label: 'Active Appointments',
-      value: '24',
-      note: '+6 today',
+      value: activeAppointmentsCount.toString(),
+      note: `${todayAppointmentsCount} scheduled today`,
       icon: CirculationIcon,
       iconClassName: 'text-[#0d9488]',
     },
     {
-      label: 'Treatments Active',
-      value: '18',
-      note: '9.3% of collection',
+      label: 'Clinical Treatments',
+      value: totalTreatmentsCount.toString(),
+      note: `${totalTreatmentsCount} diagnosed procedures`,
       icon: Stethoscope,
       iconClassName: 'text-[#14b8a6]',
     },
     {
-      label: 'Pending Follow-ups',
-      value: '12',
-      note: '4 from last week',
+      label: 'Completed Visits',
+      value: completedVisitsCount.toString(),
+      note: 'Finished consultations',
       icon: Clock,
       iconClassName: 'text-[#F59E0B]',
     },
@@ -124,7 +220,7 @@ export function DashboardContent() {
             <CirculationChart />
           </div>
           <div className="min-h-84">
-            <CollectionOverview />
+            <CollectionOverview patients={patients} />
           </div>
         </section>
 
@@ -223,20 +319,45 @@ function MetricCard({
   );
 }
 
-function CollectionOverview() {
+type TreatmentSegment = {
+  label: string;
+  count: number;
+  color: string;
+};
+
+function CollectionOverview({ patients }: { patients: any[] }) {
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
 
-  const total = collectionOverview.segments.reduce(
-    (sum, segment) => sum + segment.count,
-    0,
-  );
+  const realTreatments = useMemo(() => extractRealTreatments(patients), [patients]);
 
-  const segments = collectionOverview.segments.map((segment) => ({
+  const treatmentColors = [
+    '#008294',
+    '#0d9488',
+    '#14b8a6',
+    '#06b6d4',
+    '#3b82f6',
+    '#10b981',
+    '#f59e0b',
+  ];
+
+  const rawSegments: TreatmentSegment[] = useMemo(() => {
+    return Object.entries(realTreatments)
+      .filter(([_, count]) => (count as number) > 0)
+      .map(([label, count], index) => ({
+        label,
+        count: count as number,
+        color: treatmentColors[index % treatmentColors.length],
+      }));
+  }, [realTreatments]);
+
+  const total = rawSegments.reduce((sum: number, s: TreatmentSegment) => sum + s.count, 0);
+
+  const segments = rawSegments.map((segment: TreatmentSegment) => ({
     ...segment,
-    percentage: (segment.count / total) * 100,
+    percentage: total > 0 ? (segment.count / total) * 100 : 0,
   }));
 
-  const chartData = collectionOverview.segments.map((segment) => ({
+  const chartData = rawSegments.map((segment: TreatmentSegment) => ({
     name: segment.label,
     value: segment.count,
     fill: segment.color,
@@ -247,39 +368,53 @@ function CollectionOverview() {
       <SectionTitle>Treatments Overview</SectionTitle>
       <Card className="border-border mt-5 flex flex-1 flex-col rounded-2xl border py-0 shadow-xs ring-0">
         <CardContent className="flex h-full flex-col items-center justify-between gap-5 p-4 sm:flex-row sm:items-center sm:gap-8 sm:px-8 @4xl/dashboard:flex-col @4xl/dashboard:gap-5 @4xl/dashboard:px-4">
-          <CollectionDonutChart
-            data={chartData}
-            total={total}
-            label={collectionOverview.label}
-            size={180}
-            activeIndex={activeIndex}
-            onActiveIndexChange={setActiveIndex}
-          />
-          <div className="flex w-full flex-col gap-2.5 sm:max-w-64 @4xl/dashboard:max-w-none">
-            {segments.map((segment, index) => (
-              <div
-                key={segment.label}
-                className={cn(
-                  'text-secondary-foreground grid grid-cols-3 items-center text-sm leading-[1.4] transition-opacity duration-200',
-                  activeIndex !== null && activeIndex !== index && 'opacity-40',
-                )}
-              >
-                <div className="text-secondary-foreground/90 flex min-w-0 items-center gap-2">
-                  <span
-                    className="size-3 shrink-0 rounded-full"
-                    style={{ backgroundColor: segment.color }}
-                  />
-                  <span className="truncate font-medium">{segment.label}</span>
-                </div>
-                <span className="text-center font-semibold tabular-nums text-foreground">
-                  {segment.count.toLocaleString()}
-                </span>
-                <span className="text-right font-medium tabular-nums text-muted-foreground">
-                  {segment.percentage.toFixed(1)}%
-                </span>
+          {total > 0 ? (
+            <>
+              <CollectionDonutChart
+                data={chartData}
+                total={total}
+                label="Treatments"
+                size={180}
+                activeIndex={activeIndex}
+                onActiveIndexChange={setActiveIndex}
+              />
+              <div className="flex w-full flex-col gap-2.5 sm:max-w-64 @4xl/dashboard:max-w-none">
+                {segments.map((segment, index) => (
+                  <div
+                    key={segment.label}
+                    className={cn(
+                      'text-secondary-foreground grid grid-cols-3 items-center text-xs sm:text-sm leading-[1.4] transition-opacity duration-200',
+                      activeIndex !== null && activeIndex !== index && 'opacity-40',
+                    )}
+                  >
+                    <div className="text-secondary-foreground/90 flex min-w-0 items-center gap-2">
+                      <span
+                        className="size-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: segment.color }}
+                      />
+                      <span className="truncate font-medium">{segment.label}</span>
+                    </div>
+                    <span className="text-center font-semibold tabular-nums text-foreground">
+                      {segment.count.toLocaleString()}
+                    </span>
+                    <span className="text-right font-medium tabular-nums text-muted-foreground">
+                      {segment.percentage.toFixed(1)}%
+                    </span>
+                  </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-center p-6 text-center my-auto">
+              <div className="w-12 h-12 rounded-full bg-teal-500/10 text-[#008294] flex items-center justify-center mb-3">
+                <Stethoscope className="w-6 h-6" />
+              </div>
+              <h4 className="text-sm font-bold text-foreground">0 Treatments Logged</h4>
+              <p className="text-xs text-muted-foreground mt-1 max-w-xs">
+                As you register dental patients and diagnose teeth, real treatment procedures will appear here.
+              </p>
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

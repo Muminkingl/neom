@@ -16,6 +16,7 @@ import ToothSchedulerModal from '../../components/ToothSchedulerModal';
 import { generatePatientPDF } from '@/lib/pdfGenerator';
 import { exportToExcel } from '@/lib/excelExport';
 import { supabase } from '@/lib/supabase';
+import { Trash2 } from 'lucide-react';
 
 // High-fidelity Clean Components matching user screenshot
 import DentalChartCard from './components/DentalChartCard';
@@ -73,16 +74,42 @@ function PatientsContent() {
   const [patientVisits, setPatientVisits] = useState<Visit[]>([]);
   const [isLoadingVisits, setIsLoadingVisits] = useState(false);
 
-  // Sync with URL query parameter ?id=... or default to first patient
+  // Delete Patient state
+  const [patientToDelete, setPatientToDelete] = useState<Patient | null>(null);
+  const [isDeletingPatient, setIsDeletingPatient] = useState(false);
+
+  const handleConfirmDeletePatient = async () => {
+    if (!patientToDelete) return;
+    try {
+      setIsDeletingPatient(true);
+      await deletePatient(patientToDelete.id);
+      if (selectedPatientId === patientToDelete.id) {
+        setSelectedPatientId(null);
+        setShowDirectory(true);
+        router.replace('/dashboard/patients');
+      }
+      setPatientToDelete(null);
+      await refreshPatients();
+    } catch (err) {
+      console.error('Failed to delete patient:', err);
+      alert(err instanceof Error ? err.message : 'Failed to delete patient');
+    } finally {
+      setIsDeletingPatient(false);
+    }
+  };
+
+  // Sync with URL query parameter ?id=...
   useEffect(() => {
     const queryId = searchParams.get('id');
     if (queryId && patients.some((p) => p.id === queryId)) {
       setSelectedPatientId(queryId);
       setShowDirectory(false);
-    } else if (!selectedPatientId && patients.length > 0) {
-      setSelectedPatientId(patients[0].id);
+    } else if (!queryId) {
+      // Direct access to /dashboard/patients without query -> show Patients Directory
+      setSelectedPatientId(null);
+      setShowDirectory(true);
     }
-  }, [searchParams, patients, selectedPatientId]);
+  }, [searchParams, patients]);
 
   // Active patient object
   const selectedPatient = useMemo(
@@ -113,21 +140,39 @@ function PatientsContent() {
       const teeth = parsed?.teeth || {};
       const records: DentalRecordItem[] = Object.entries(teeth)
         .filter(([, data]: any) => data && data.condition && data.condition !== 'sound')
-        .map(([toothId, data]: any) => ({
-          toothId,
-          condition: data.condition,
-          surfaces: data.surfaces || [],
-          treatment: data.treatment || data.procedure || '',
-          price: data.price || undefined,
-          status: data.status || 'In Progress',
-          notes: data.notes || '',
-        }));
+        .map(([toothId, data]: any) => {
+          let toothTreatment = data.treatment || data.procedure || '';
+          if (!toothTreatment && selectedPatient?.treatment) {
+            const match = selectedPatient.treatment.match(new RegExp(`Tooth #${toothId}[^:]*:\\s*([^;]+)`, 'i'));
+            if (match) toothTreatment = match[1].trim();
+          }
+          if (!toothTreatment && patientVisits.length > 0) {
+            for (const v of patientVisits) {
+              if (v.treatment) {
+                const match = v.treatment.match(new RegExp(`Tooth #${toothId}[^:]*:\\s*([^;]+)`, 'i'));
+                if (match) {
+                  toothTreatment = match[1].trim();
+                  break;
+                }
+              }
+            }
+          }
+          return {
+            toothId,
+            condition: data.condition,
+            surfaces: data.surfaces || [],
+            treatment: toothTreatment,
+            price: data.price || undefined,
+            status: data.status || 'In Progress',
+            notes: data.notes || '',
+          };
+        });
 
       return { chartData: parsed, teethData: teeth, dentalRecords: records };
     } catch {
       return { chartData: null, teethData: {}, dentalRecords: [] };
     }
-  }, [selectedPatient?.tableData]);
+  }, [selectedPatient?.tableData, selectedPatient?.treatment, patientVisits]);
 
   // Extract scheduled procedures
   const toothSchedules = useMemo(() => {
@@ -312,8 +357,54 @@ function PatientsContent() {
             setSelectedPatientId(p.id);
             setShowDirectory(false);
           }}
+          onDeletePatient={(id) => {
+            const p = patients.find((x) => x.id === id);
+            if (p) setPatientToDelete(p);
+          }}
           onExportExcel={handleExportExcel}
         />
+
+        {/* Delete Patient Confirmation Modal (in Directory Mode) */}
+        {patientToDelete && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-md p-6 sm:p-7 text-center">
+              <div className="w-13 h-13 rounded-2xl bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 flex items-center justify-center mx-auto mb-4 shadow-xs">
+                <Trash2 className="w-6 h-6 stroke-[2.2]" />
+              </div>
+              <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+                Delete Patient Record?
+              </h3>
+              <p className="mt-2 text-xs sm:text-sm text-slate-600 dark:text-slate-300">
+                Are you sure you want to permanently delete{' '}
+                <span className="font-bold text-slate-900 dark:text-white">
+                  &quot;{patientToDelete.name}&quot;
+                </span>
+                {patientToDelete.clinicId ? ` (ID: ${patientToDelete.clinicId})` : ''}?
+              </p>
+              <p className="mt-2 text-[11px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 p-2.5 rounded-xl border border-rose-200 dark:border-rose-900/50">
+                ⚠️ Warning: This will permanently remove all dental charts, diagnosis history, scheduled procedures, and billing invoices. This action cannot be undone.
+              </p>
+              <div className="mt-6 flex items-center justify-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={() => setPatientToDelete(null)}
+                  disabled={isDeletingPatient}
+                  className="px-5 py-2.5 rounded-full text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleConfirmDeletePatient}
+                  disabled={isDeletingPatient}
+                  className="px-6 py-2.5 rounded-full text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-md shadow-rose-600/20 transition cursor-pointer disabled:opacity-50"
+                >
+                  {isDeletingPatient ? 'Deleting...' : 'Yes, Delete Patient'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -336,9 +427,13 @@ function PatientsContent() {
         patient={selectedPatient}
         allPatients={patients}
         onSelectPatient={(p) => setSelectedPatientId(p.id)}
-        onOpenDirectory={() => setShowDirectory(true)}
+        onOpenDirectory={() => {
+          setSelectedPatientId(null);
+          setShowDirectory(true);
+        }}
         onEditPatient={() => setIsEditingPatient(true)}
         onPrintPatient={handlePrintTreatmentCard}
+        onDeletePatient={() => setPatientToDelete(selectedPatient)}
         currentSectionTitle={sectionTitleMap[activeTab]}
       />
 
@@ -387,6 +482,7 @@ function PatientsContent() {
           <PatientProfileTab
             patient={selectedPatient}
             onEdit={() => setIsEditingPatient(true)}
+            onDelete={() => setPatientToDelete(selectedPatient)}
           />
         </div>
       )}
@@ -497,6 +593,48 @@ function PatientsContent() {
           visit={patientVisits[0] || ({ id: 'default', patient_id: selectedPatient.id, visited_at: new Date().toISOString() } as Visit)}
           onClose={() => setShowInvestigationModal(false)}
         />
+      )}
+
+      {/* Delete Patient Confirmation Modal (in Patient Record Mode) */}
+      {patientToDelete && (
+        <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/60 backdrop-blur-xs animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200/80 dark:border-slate-800 rounded-3xl shadow-2xl w-full max-w-md p-6 sm:p-7 text-center">
+            <div className="w-13 h-13 rounded-2xl bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20 flex items-center justify-center mx-auto mb-4 shadow-xs">
+              <Trash2 className="w-6 h-6 stroke-[2.2]" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+              Delete Patient Record?
+            </h3>
+            <p className="mt-2 text-xs sm:text-sm text-slate-600 dark:text-slate-300">
+              Are you sure you want to permanently delete{' '}
+              <span className="font-bold text-slate-900 dark:text-white">
+                &quot;{patientToDelete.name}&quot;
+              </span>
+              {patientToDelete.clinicId ? ` (ID: ${patientToDelete.clinicId})` : ''}?
+            </p>
+            <p className="mt-2 text-[11px] text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/30 p-2.5 rounded-xl border border-rose-200 dark:border-rose-900/50">
+              ⚠️ Warning: This will permanently remove all dental charts, diagnosis history, scheduled procedures, and billing invoices. This action cannot be undone.
+            </p>
+            <div className="mt-6 flex items-center justify-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => setPatientToDelete(null)}
+                disabled={isDeletingPatient}
+                className="px-5 py-2.5 rounded-full text-xs font-semibold text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDeletePatient}
+                disabled={isDeletingPatient}
+                className="px-6 py-2.5 rounded-full text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 shadow-md shadow-rose-600/20 transition cursor-pointer disabled:opacity-50"
+              >
+                {isDeletingPatient ? 'Deleting...' : 'Yes, Delete Patient'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

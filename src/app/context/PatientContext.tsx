@@ -258,11 +258,12 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
             clinicId: p.clinic_id || '',
             note: p.note,
             tableData: p.table_data || '',
-            history: p.history || '',
-            pastMedicalHistory: p.past_medical_history || '',
-            drugHistory: p.drug_history || '',
-            pastSurgicalHistory: p.past_surgical_history || '',
-            examination: p.examination || '',
+            history: parsedTable.history || p.history || '',
+            pastMedicalHistory: parsedTable.pastMedicalHistory || p.past_medical_history || '',
+            drugHistory: parsedTable.drugHistory || p.drug_history || '',
+            pastSurgicalHistory: parsedTable.pastSurgicalHistory || p.past_surgical_history || '',
+            examination: parsedTable.examination || p.examination || '',
+            prescription: parsedTable.prescription || (p as any).prescription || '',
             followUpDate: p.follow_up_date || '',
             amountPaid: p.amount_paid ?? parsedTable.amountPaid ?? 0,
             totalCost: parsedTable.totalCost ?? (p as any).total_cost ?? '',
@@ -767,7 +768,7 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
         // Allow editing
       }
 
-      // Convert camelCase to snake_case for database
+      // Convert camelCase to snake_case ONLY for valid physical database columns
       const dbData: any = {};
 
       if (patientData.name !== undefined) dbData.name = patientData.name;
@@ -779,44 +780,65 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
       if (patientData.diagnosis !== undefined) dbData.diagnosis = patientData.diagnosis;
       if (patientData.treatment !== undefined) dbData.treatment = patientData.treatment;
       if (patientData.currentTreatment !== undefined) dbData.current_treatment = patientData.currentTreatment;
-      // Note: we don't allow editing clinicId as it's system-generated
       if (patientData.note !== undefined) dbData.note = patientData.note;
-      if (patientData.tableData !== undefined) dbData.table_data = patientData.tableData;
-      if (patientData.history !== undefined) dbData.history = patientData.history;
-      if (patientData.pastMedicalHistory !== undefined) dbData.past_medical_history = patientData.pastMedicalHistory;
-      if (patientData.drugHistory !== undefined) dbData.drug_history = patientData.drugHistory;
-      if (patientData.pastSurgicalHistory !== undefined) dbData.past_surgical_history = patientData.pastSurgicalHistory;
-      if (patientData.examination !== undefined) dbData.examination = patientData.examination;
+      if (patientData.followUpDate !== undefined) dbData.follow_up_date = patientData.followUpDate;
       if (patientData.amountPaid !== undefined) dbData.amount_paid = Number(patientData.amountPaid) || 0;
 
-      // Merge payment info into table_data JSON
-      if (patientData.totalCost !== undefined || patientData.remainingBalance !== undefined || patientData.tableData !== undefined) {
-        let existingTable: any = {};
-        const currentPatient = patients.find(p => p.id === id);
-        try {
-          existingTable = (patientData.tableData || currentPatient?.tableData) ? JSON.parse(patientData.tableData || currentPatient?.tableData || '{}') : {};
-        } catch {}
-        if (patientData.totalCost !== undefined) existingTable.totalCost = patientData.totalCost;
-        if (patientData.remainingBalance !== undefined) existingTable.remainingBalance = patientData.remainingBalance;
-        if (patientData.amountPaid !== undefined) existingTable.amountPaid = patientData.amountPaid;
-        dbData.table_data = JSON.stringify(existingTable);
-      }
+      // Merge payment info, medical history, examination, and prescriptions into table_data JSON
+      let existingTable: any = {};
+      const currentPatient = patients.find(p => p.id === id);
+      try {
+        existingTable = (patientData.tableData || currentPatient?.tableData)
+          ? JSON.parse(patientData.tableData || currentPatient?.tableData || '{}')
+          : {};
+      } catch {}
+
+      if (patientData.history !== undefined) existingTable.history = patientData.history;
+      if (patientData.pastMedicalHistory !== undefined) existingTable.pastMedicalHistory = patientData.pastMedicalHistory;
+      if (patientData.drugHistory !== undefined) existingTable.drugHistory = patientData.drugHistory;
+      if (patientData.pastSurgicalHistory !== undefined) existingTable.pastSurgicalHistory = patientData.pastSurgicalHistory;
+      if (patientData.examination !== undefined) existingTable.examination = patientData.examination;
+      if (patientData.prescription !== undefined) existingTable.prescription = patientData.prescription;
+      if (patientData.totalCost !== undefined) existingTable.totalCost = patientData.totalCost;
+      if (patientData.remainingBalance !== undefined) existingTable.remainingBalance = patientData.remainingBalance;
+      if (patientData.amountPaid !== undefined) existingTable.amountPaid = patientData.amountPaid;
+
+      // Always save updated JSON string to table_data
+      dbData.table_data = JSON.stringify(existingTable);
 
       // Always use Supabase for data storage
-      const { error } = await supabase
+      let updateQuery = supabase
         .from('patients')
         .update(dbData)
-        .eq('id', id)
-        .eq('user_id', userId);
+        .eq('id', id);
 
-      if (error) {
-        console.error('Supabase error editing patient:', error);
-        throw new Error(`Database error: ${error.message}`);
+      // Only filter by user_id if not admin
+      if (userId && userId !== '00000000-0000-0000-0000-000000000000') {
+        updateQuery = updateQuery.eq('user_id', userId);
       }
 
-      // Update local state
+      const { error } = await updateQuery;
+
+      if (error) {
+        console.error('Supabase error editing patient:', error.message || error);
+        throw new Error(`Database error: ${error.message || 'Update failed'}`);
+      }
+
+      // Update local state with merged fields
       setPatients((prevPatients: Patient[]) => prevPatients.map((patient: Patient) =>
-        patient.id === id ? { ...patient, ...patientData } : patient
+        patient.id === id
+          ? {
+              ...patient,
+              ...patientData,
+              tableData: dbData.table_data,
+              history: existingTable.history ?? patient.history,
+              pastMedicalHistory: existingTable.pastMedicalHistory ?? patient.pastMedicalHistory,
+              drugHistory: existingTable.drugHistory ?? patient.drugHistory,
+              pastSurgicalHistory: existingTable.pastSurgicalHistory ?? patient.pastSurgicalHistory,
+              examination: existingTable.examination ?? patient.examination,
+              prescription: existingTable.prescription ?? patient.prescription,
+            }
+          : patient
       ));
     } catch (err) {
       console.error('Error editing patient:', err);

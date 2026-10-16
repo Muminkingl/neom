@@ -17,6 +17,13 @@ export default function PatientMedicalTab({ patient, onSaveMedical }: PatientMed
   const [isSaving, setIsSaving] = useState(false);
   const [isSaved, setIsSaved] = useState(false);
 
+  React.useEffect(() => {
+    setHistory(patient.history || '');
+    setPastMedicalHistory(patient.pastMedicalHistory || '');
+    setDrugHistory(patient.drugHistory || '');
+    setPastSurgicalHistory(patient.pastSurgicalHistory || '');
+  }, [patient.id, patient.history, patient.pastMedicalHistory, patient.drugHistory, patient.pastSurgicalHistory]);
+
   const handleSave = async () => {
     setIsSaving(true);
     try {
@@ -28,6 +35,9 @@ export default function PatientMedicalTab({ patient, onSaveMedical }: PatientMed
       });
       setIsSaved(true);
       setTimeout(() => setIsSaved(false), 2500);
+    } catch (err: any) {
+      console.error('Save medical history error:', err);
+      alert(`Failed to save medical history: ${err?.message || 'Unknown error'}`);
     } finally {
       setIsSaving(false);
     }
