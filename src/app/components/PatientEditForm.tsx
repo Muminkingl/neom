@@ -579,51 +579,20 @@ export default function PatientEditForm({ patient, onSubmit, onCancel, isLoading
           />
         </div>
 
-        {/* Past Medical History */}
+        {/* Medical History */}
         <div>
           <label htmlFor="pastMedicalHistory" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Past Medical History
+            Medical History
           </label>
           <textarea
             id="pastMedicalHistory"
             name="pastMedicalHistory"
             value={formData.pastMedicalHistory}
             onChange={handleChange}
-            rows={3}
+            rows={4}
+            placeholder="Chronic conditions, allergies, medications, surgical history..."
             disabled={isLoading}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-70 disabled:cursor-not-allowed"
-          />
-        </div>
-
-        {/* Drug History */}
-        <div>
-          <label htmlFor="drugHistory" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Drug History
-          </label>
-          <textarea
-            id="drugHistory"
-            name="drugHistory"
-            value={formData.drugHistory}
-            onChange={handleChange}
-            rows={3}
-            disabled={isLoading}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-70 disabled:cursor-not-allowed"
-          />
-        </div>
-
-        {/* Past Surgical History */}
-        <div>
-          <label htmlFor="pastSurgicalHistory" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-            Past Surgical History
-          </label>
-          <textarea
-            id="pastSurgicalHistory"
-            name="pastSurgicalHistory"
-            value={formData.pastSurgicalHistory}
-            onChange={handleChange}
-            rows={3}
-            disabled={isLoading}
-            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-70 disabled:cursor-not-allowed"
+            className="w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500 bg-white dark:bg-gray-800 text-gray-900 dark:text-white disabled:opacity-70 disabled:cursor-not-allowed text-xs sm:text-sm"
           />
         </div>
 

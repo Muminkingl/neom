@@ -16,6 +16,7 @@ import {
   OpacIcon,
   ReportsIcon,
   ReturnIcon,
+  OrthoIcon,
 } from './components/library/icons';
 
 export type NavigationIcon = ComponentType<SVGProps<SVGSVGElement>>;
@@ -50,6 +51,12 @@ export const primaryNavigation: NavigationItem[] = [
     href: '/dashboard/patient-form',
     icon: BookPlusIcon,
     section: 'patient-form',
+  },
+  {
+    label: 'Ortho',
+    href: '/dashboard/ortho',
+    icon: OrthoIcon,
+    section: 'ortho',
   },
   {
     label: 'Schedule',

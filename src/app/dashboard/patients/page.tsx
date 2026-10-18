@@ -26,6 +26,7 @@ import PatientHeader from './components/PatientHeader';
 import DentalRecordModal from './components/DentalRecordModal';
 import PatientProfileTab from './components/PatientProfileTab';
 import PatientMedicalTab from './components/PatientMedicalTab';
+import PatientOrthoTab from './components/PatientOrthoTab';
 import PatientAppointmentsTab from './components/PatientAppointmentsTab';
 import PatientInvoicesTab from './components/PatientInvoicesTab';
 import PatientDocumentsTab from './components/PatientDocumentsTab';
@@ -413,6 +414,7 @@ function PatientsContent() {
   const sectionTitleMap: Record<PatientTab, string> = {
     profile: 'Profile details',
     dental: 'Dental history',
+    ortho: 'Orthodontic record',
     medical: 'Medical history',
     appointments: 'Appointments schedule',
     invoices: 'Financial invoices',
@@ -474,6 +476,12 @@ function PatientsContent() {
               setShowSchedulerModal(true);
             }}
           />
+        </div>
+      )}
+
+      {activeTab === 'ortho' && (
+        <div className="animate-in fade-in duration-200">
+          <PatientOrthoTab patient={selectedPatient} />
         </div>
       )}
 

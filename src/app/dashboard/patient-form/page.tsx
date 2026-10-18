@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useEffect, useMemo, Suspense } from 'react';
-import { usePatients, Patient, extractToothSchedulesFromTableData } from '../../context/PatientContext';
+import { usePatients, Patient, Visit, extractToothSchedulesFromTableData } from '../../context/PatientContext';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '../../context/AuthContext';
-import DentitionChart, { parseEffectiveAge, extractDiagnosedTeeth } from '../../components/DentitionChart';
+import DentitionChart, { parseEffectiveAge, extractDiagnosedTeeth, CONDITION_CONFIG, SingleToothDentalCard } from '../../components/DentitionChart';
 import ToothSchedulerModal from '../../components/ToothSchedulerModal';
 import { ToothIcon } from '../../components/ToothIcon';
 import { motion, AnimatePresence } from 'motion/react';
@@ -26,7 +26,8 @@ import {
   Clock,
   Sparkles,
   ShieldCheck,
-  Search
+  Search,
+  Pencil
 } from 'lucide-react';
 
 /**
@@ -55,8 +56,8 @@ export const normalizeFullNameOnBlur = (input: string): string => {
 };
 
 function PatientFormContent() {
-  const { addPatient, addVisit, editAppointment, patients, isLoading, error } = usePatients();
-  const router = useRouter();
+  const { addPatient, addVisit, editPatient, editVisit, editAppointment, patients, getPatientVisits, isLoading, error } = usePatients();
+  const router = useRouter();   
   const searchParams = useSearchParams();
   const { isStaffAuth, isReceptionAuth } = useAuth();
 
@@ -75,6 +76,28 @@ function PatientFormContent() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Patient[]>([]);
   const [selectedPatient, setSelectedPatient] = useState<Patient | null>(null);
+
+  // Returning patient specific states
+  const [showNewChart, setShowNewChart] = useState(false);
+  const [patientVisits, setPatientVisits] = useState<Visit[]>([]);
+  const [loadingVisits, setLoadingVisits] = useState(false);
+  const [editingVisitId, setEditingVisitId] = useState<string | null>(null);
+  const [editedVisitFinances, setEditedVisitFinances] = useState<Record<string, { cost: string; paid: string }>>({});
+
+  // Fetch visit history when returning patient is selected
+  useEffect(() => {
+    setEditingVisitId(null);
+    setEditedVisitFinances({});
+    if (mode === 'existing' && selectedPatient?.id) {
+      setLoadingVisits(true);
+      getPatientVisits(selectedPatient.id)
+        .then(v => setPatientVisits(v || []))
+        .catch(() => setPatientVisits([]))
+        .finally(() => setLoadingVisits(false));
+    } else {
+      setPatientVisits([]);
+    }
+  }, [mode, selectedPatient, getPatientVisits]);
 
   const [appointmentId, setAppointmentId] = useState<string | null>(null);
 
@@ -111,6 +134,12 @@ function PatientFormContent() {
   const diagnosedTeeth = useMemo(() => {
     return extractDiagnosedTeeth(formData.tableData);
   }, [formData.tableData]);
+
+  // Historical teeth previously charted for returning patient
+  const prevDiagnosedTeeth = useMemo(() => {
+    if (!selectedPatient?.tableData) return [];
+    return extractDiagnosedTeeth(selectedPatient.tableData);
+  }, [selectedPatient]);
 
   // General non-tooth diagnoses and customized tooth treatments
   const [generalDiagnoses, setGeneralDiagnoses] = useState<string[]>([]);
@@ -245,6 +274,10 @@ function PatientFormContent() {
     setCustomDiagnosisInput('');
     setToothTreatments({});
     setGeneralTreatmentNotes('');
+    setShowNewChart(false);
+    setPatientVisits([]);
+    setEditingVisitId(null);
+    setEditedVisitFinances({});
     setFormSubmitted(false);
     setSelectedPatient(null);
     setMode('new');
@@ -256,8 +289,8 @@ function PatientFormContent() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Reception only has 1 step — always submit immediately
-    if (currentStep < 3 && !isReception) {
+    // In new patient mode, only submit on final step
+    if (mode === 'new' && currentStep < 3 && !isReception) {
       setCurrentStep(prev => Math.min(3, prev + 1));
       return;
     }
@@ -292,18 +325,77 @@ function PatientFormContent() {
 
       let createdPatient: Patient | null = null;
       if (mode === 'existing' && selectedPatient) {
+        // 1. Save any edited past visits to database
+        if (Object.keys(editedVisitFinances).length > 0) {
+          for (const [vId, fin] of Object.entries(editedVisitFinances)) {
+            const vCostNum = Number(fin.cost) || 0;
+            const vPaidNum = Number(fin.paid) || 0;
+            const vBalNum = Math.max(0, vCostNum - vPaidNum);
+
+            if (vId === 'admission') {
+              try {
+                await editPatient(selectedPatient.id, {
+                  totalCost: vCostNum,
+                  amountPaid: vPaidNum,
+                  remainingBalance: vBalNum,
+                });
+              } catch (e) {
+                console.error('Error updating admission record:', e);
+              }
+            } else {
+              try {
+                await editVisit(vId, {
+                  amount_paid: vPaidNum,
+                  totalCost: vCostNum,
+                  remainingBalance: vBalNum,
+                });
+              } catch (e) {
+                console.error(`Error updating visit ${vId}:`, e);
+              }
+            }
+          }
+        }
+
+        // 2. Calculate updated cumulative financial totals incorporating any edits
+        let baseHistoricalCost = 0;
+        let baseHistoricalPaid = 0;
+
+        if (patientVisits.length > 0) {
+          patientVisits.forEach(v => {
+            let vTable: any = {};
+            try { if (v.table_data) vTable = JSON.parse(v.table_data); } catch {}
+            const origCost = Number(v.total_cost ?? vTable.totalCost ?? (v as any).totalCost) || 0;
+            const origPaid = Number(v.amount_paid ?? vTable.amountPaid ?? (v as any).amountPaid) || 0;
+            const cost = editedVisitFinances[v.id]?.cost !== undefined ? (Number(editedVisitFinances[v.id].cost) || 0) : origCost;
+            const paid = editedVisitFinances[v.id]?.paid !== undefined ? (Number(editedVisitFinances[v.id].paid) || 0) : origPaid;
+            baseHistoricalCost += cost;
+            baseHistoricalPaid += paid;
+          });
+        } else {
+          const origCost = Number(selectedPatient.totalCost) || 0;
+          const origPaid = Number(selectedPatient.amountPaid) || 0;
+          baseHistoricalCost = editedVisitFinances['admission']?.cost !== undefined ? (Number(editedVisitFinances['admission'].cost) || 0) : origCost;
+          baseHistoricalPaid = editedVisitFinances['admission']?.paid !== undefined ? (Number(editedVisitFinances['admission'].paid) || 0) : origPaid;
+        }
+
+        const newCost = Number(formData.totalCost) || 0;
+        const newPaid = Number(formData.amountPaid) || 0;
+        const cumulativeCost = baseHistoricalCost + newCost;
+        const cumulativePaid = baseHistoricalPaid + newPaid;
+        const cumulativeBalance = Math.max(0, cumulativeCost - cumulativePaid);
+
         const res = await addVisit(selectedPatient.id, {
           ...formData,
           treatment: visitTreatmentDesc,
           tableData: finalizedTableData,
-          clinicId: '',
-          amountPaid: formData.amountPaid,
-          totalCost: formData.totalCost,
-          remainingBalance: formData.remainingBalance
+          clinicId: selectedPatient.clinicId || '',
+          amountPaid: cumulativePaid,
+          totalCost: cumulativeCost,
+          remainingBalance: cumulativeBalance
         });
         createdPatient = res && (res as any).patient 
           ? (res as any).patient 
-          : { ...selectedPatient, ...formData, treatment: visitTreatmentDesc, amountPaid: formData.amountPaid, totalCost: formData.totalCost, remainingBalance: formData.remainingBalance, tableData: finalizedTableData };
+          : { ...selectedPatient, ...formData, treatment: visitTreatmentDesc, amountPaid: cumulativePaid, totalCost: cumulativeCost, remainingBalance: cumulativeBalance, tableData: finalizedTableData };
       } else {
         const res = await addPatient({
           ...formData,
@@ -458,7 +550,9 @@ function PatientFormContent() {
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div>
                   <h2 className="text-xl sm:text-2xl font-bold text-gray-900 dark:text-white tracking-tight">
-                    {isReception
+                    {mode === 'existing'
+                      ? 'Returning Patient Visit'
+                      : isReception
                       ? 'Patient Information'
                       : currentStep === 1
                       ? 'Step 1: Personal Details'
@@ -467,7 +561,9 @@ function PatientFormContent() {
                       : 'Step 3: Dentition Chart & Treatment'}
                   </h2>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-                    {isReception
+                    {mode === 'existing'
+                      ? 'Select existing patient, review documented teeth history, and record new procedures & payments'
+                      : isReception
                       ? 'Fill in basic patient details and payment'
                       : currentStep === 1
                       ? 'Enter patient demographic details'
@@ -513,532 +609,1078 @@ function PatientFormContent() {
               {/* Dashed divider as inspired by onboarding-setup.tsx */}
               <div className="my-5 border-t-[1.6px] border-dashed border-gray-200 dark:border-gray-800" />
 
-              {/* Existing Patient Search Dropdown */}
-              {mode === 'existing' && !selectedPatient && (
-                <div className="mb-6 space-y-2">
-                  <label className="text-xs font-bold text-gray-700 dark:text-gray-300">
-                    Find Existing Patient
-                  </label>
-                  <div className="relative">
-                    <Search className="absolute inset-y-0 left-3.5 my-auto w-4 h-4 text-gray-400" />
-                    <input
-                      type="text"
-                      placeholder="Search patient by name, mobile, or clinic ID..."
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#161d20] text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
-                    />
-                  </div>
-                  {searchQuery && searchResults.length > 0 && (
-                    <div className="border border-gray-200 dark:border-gray-800 rounded-xl bg-white dark:bg-[#161d20] overflow-hidden shadow-lg divide-y divide-gray-100 dark:divide-gray-800">
-                      {searchResults.map(p => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          onClick={() => {
-                            setSelectedPatient(p);
-                            setFormData(prev => ({
-                              ...prev,
-                              name: p.name,
-                              dob: p.dob || '',
-                              sex: p.sex || '',
-                              mobileNumber: p.mobileNumber || '',
-                              hospitalFileNumber: p.hospitalFileNumber || '',
-                            }));
-                            setSearchQuery('');
-                          }}
-                          className="w-full text-left px-4 py-2.5 hover:bg-teal-50 dark:hover:bg-teal-950/20 transition-colors flex items-center justify-between"
-                        >
-                          <div>
-                            <span className="text-xs font-bold text-gray-900 dark:text-white">{p.name}</span>
-                            <div className="text-[10px] text-gray-500 mt-0.5">
-                              {p.clinicId && <span className="mr-2 font-mono">ID: {p.clinicId}</span>}
-                              {p.mobileNumber && <span>📞 {p.mobileNumber}</span>}
-                            </div>
-                          </div>
-                          <ChevronRight className="w-3.5 h-3.5 text-gray-400" />
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
               {/* Form Body */}
               <form onSubmit={handleSubmit} className="flex-1 flex flex-col justify-between space-y-6">
                 
-                {/* ── STEP 1: PERSONAL DETAILS ── */}
-                {currentStep === 1 && (
-                  <div className="space-y-4">
-                    {/* Full Name */}
-                    <div>
-                      <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
-                        Patient Full Name <span className="text-red-500">*</span>
-                      </label>
-                      <input
-                        type="text"
-                        name="name"
-                        value={formData.name}
-                        onChange={handleChange}
-                        onBlur={() => {
-                          setFormData(prev => ({
-                            ...prev,
-                            name: normalizeFullNameOnBlur(prev.name)
-                          }));
-                        }}
-                        required
-                        disabled={isLoading || formSubmitted}
-                        placeholder="e.g. Mumin Muhammed Ghareeb"
-                        className="h-11 w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#141b1e] px-4 text-xs font-semibold text-gray-900 dark:text-white outline-none focus:bg-white dark:focus:bg-[#161d20] focus:ring-2 focus:ring-teal-500 transition-all placeholder:text-gray-400"
-                      />
-                    </div>
-
-                    {/* Gender pill selector inspired by onboarding-setup.tsx */}
-                    <div>
-                      <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
-                        Gender
-                      </label>
-                      <div className="flex gap-2">
-                        {[
-                          { id: 'Male', label: 'Male' },
-                          { id: 'Female', label: 'Female' },
-                        ].map((opt) => {
-                          const active = formData.sex === opt.id;
-                          return (
-                            <button
-                              key={opt.id}
-                              type="button"
-                              onClick={() => setFormData(prev => ({ ...prev, sex: opt.id }))}
-                              className={`flex items-center gap-2 rounded-xl border-[1.5px] px-5 py-2.5 text-xs font-semibold transition-all cursor-pointer ${
-                                active
-                                  ? 'border-teal-500/50 bg-teal-500/10 text-teal-700 dark:border-teal-500/60 dark:bg-teal-950/40 dark:text-teal-300 shadow-2xs'
-                                  : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-800 dark:bg-[#141b1e] dark:text-gray-400 dark:hover:border-gray-700'
-                              }`}
-                            >
-                              {active && <CheckCircle2 className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />}
-                              {opt.label}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-
-                    {/* Grid: Age & Mobile Number */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
-                          Age / Date of Birth
-                        </label>
-                        <input
-                          type="text"
-                          name="dob"
-                          value={formData.dob}
-                          onChange={handleChange}
-                          placeholder="e.g. 25, or 1999-04-12"
-                          className="h-10 w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#141b1e] px-4 text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
-                          Mobile Number
+                {/* ══════════════════════════════════════════════════════════════════
+                    MODE: RETURNING PATIENT (STREAMLINED VISIT WORKFLOW)
+                   ══════════════════════════════════════════════════════════════════ */}
+                {mode === 'existing' ? (
+                  <div className="space-y-6">
+                    {/* 1. If no patient selected yet: Show Search Bar */}
+                    {!selectedPatient ? (
+                      <div className="space-y-3">
+                        <label className="text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                          <Search className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                          <span>Find Existing Patient</span>
                         </label>
                         <div className="relative">
-                          <Phone className="absolute inset-y-0 left-3.5 my-auto w-3.5 h-3.5 text-gray-400" />
+                          <Search className="absolute inset-y-0 left-3.5 my-auto w-4 h-4 text-gray-400" />
                           <input
                             type="text"
-                            name="mobileNumber"
-                            value={formData.mobileNumber}
-                            onChange={handleChange}
-                            placeholder="e.g. 07510201840"
-                            className="h-10 w-full pl-9 pr-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#141b1e] text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
+                            placeholder="Search patient by name, mobile, or clinic ID..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            autoFocus
+                            className="w-full pl-10 pr-4 py-3 rounded-2xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#161d20] text-xs sm:text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500 shadow-xs"
                           />
                         </div>
-                      </div>
-                    </div>
 
-                    {/* Hospital File Number (Optional) */}
-                    <div>
-                      <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
-                        Hospital File # (Optional)
-                      </label>
-                      <input
-                        type="text"
-                        name="hospitalFileNumber"
-                        value={formData.hospitalFileNumber}
-                        onChange={handleChange}
-                        placeholder="e.g. HF-8821"
-                        className="h-10 w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#141b1e] px-4 text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
-                      />
-                    </div>
-
-                    {/* Reception Only: Direct Payment Fields on Step 1 */}
-                    {isReception && (
-                      <div className="p-4 rounded-2xl bg-teal-500/5 dark:bg-teal-950/20 border border-teal-500/20 space-y-3 pt-3">
-                        <div className="flex items-center justify-between">
-                          <span className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
-                            <CreditCard className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                            Admission Payment (USD)
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">Total Cost</label>
-                            <input
-                              type="text"
-                              name="totalCost"
-                              value={formData.totalCost}
-                              onChange={handleChange}
-                              placeholder="0.00"
-                              className="h-10 w-full px-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111719] text-xs font-mono font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
-                            />
+                        {/* Search Results list */}
+                        {searchQuery && searchResults.length > 0 && (
+                          <div className="border border-gray-200 dark:border-gray-800 rounded-2xl bg-white dark:bg-[#161d20] overflow-hidden shadow-xl divide-y divide-gray-100 dark:divide-gray-800 max-h-80 overflow-y-auto">
+                            {searchResults.map(p => (
+                              <button
+                                key={p.id}
+                                type="button"
+                                onClick={() => {
+                                  setSelectedPatient(p);
+                                  setFormData(prev => ({
+                                    ...prev,
+                                    name: p.name,
+                                    dob: p.dob || '',
+                                    sex: p.sex || '',
+                                    mobileNumber: p.mobileNumber || '',
+                                    hospitalFileNumber: p.hospitalFileNumber || '',
+                                    pastMedicalHistory: p.pastMedicalHistory || '',
+                                    tableData: p.tableData || '',
+                                    totalCost: '',
+                                    amountPaid: '',
+                                    remainingBalance: '',
+                                    note: '',
+                                  }));
+                                  setSearchQuery('');
+                                  setShowNewChart(false);
+                                }}
+                                className="w-full text-left px-4 py-3 hover:bg-teal-50 dark:hover:bg-teal-950/20 transition-colors flex items-center justify-between cursor-pointer"
+                              >
+                                <div>
+                                  <div className="text-xs sm:text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                    <span>{p.name}</span>
+                                    {p.clinicId && (
+                                      <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-teal-500/10 text-teal-800 dark:text-teal-300">
+                                        ID: {p.clinicId}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5 flex items-center gap-3">
+                                    {p.mobileNumber && <span>📞 {p.mobileNumber}</span>}
+                                    {p.sex && <span>• {p.sex}</span>}
+                                    {p.dob && <span>• Age: {p.dob}</span>}
+                                  </div>
+                                </div>
+                                <ChevronRight className="w-4 h-4 text-gray-400" />
+                              </button>
+                            ))}
                           </div>
-                          <div>
-                            <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">Amount Paid</label>
-                            <input
-                              type="text"
-                              name="amountPaid"
-                              value={formData.amountPaid}
-                              onChange={handleChange}
-                              placeholder="0.00"
-                              className="h-10 w-full px-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111719] text-xs font-mono font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
-                            />
+                        )}
+                        {searchQuery && searchResults.length === 0 && (
+                          <div className="p-6 text-center rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 text-xs text-gray-400">
+                            No registered patients found matching &ldquo;{searchQuery}&rdquo;.
                           </div>
-                        </div>
+                        )}
+                        {!searchQuery && (
+                          <div className="p-8 text-center rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 space-y-1">
+                            <Users className="w-8 h-8 text-teal-600/40 mx-auto mb-2" />
+                            <p className="text-xs font-semibold text-gray-700 dark:text-gray-300">Select an existing patient</p>
+                            <p className="text-[11px] text-gray-400">Type patient name, phone number, or clinic ID to load their records</p>
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                )}
+                    ) : (
+                      /* When patient is selected: */
+                      <div className="space-y-6">
+                        {/* 1. Patient Profile Summary Card */}
+                        <div className="p-4 rounded-2xl bg-teal-500/5 dark:bg-teal-950/20 border border-teal-500/20 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-12 h-12 rounded-2xl bg-[#008294] text-white flex items-center justify-center font-bold text-lg shadow-xs shrink-0">
+                              {selectedPatient.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h3 className="text-sm sm:text-base font-bold text-gray-900 dark:text-white">
+                                  {selectedPatient.name}
+                                </h3>
+                                {selectedPatient.clinicId && (
+                                  <span className="font-mono text-[11px] font-bold px-2 py-0.5 rounded-md bg-teal-500/15 text-teal-800 dark:text-teal-300">
+                                    ID: {selectedPatient.clinicId}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
+                                {selectedPatient.mobileNumber || 'No phone'} • {selectedPatient.sex || 'Patient'} • Age: {selectedPatient.dob || 'N/A'}
+                              </p>
+                            </div>
+                          </div>
 
-                {/* ── STEP 2: MEDICAL HISTORY ── */}
-                {currentStep === 2 && !isReception && (
-                  <div className="space-y-4">
-                    {/* Date of Diagnosis / Condition Onset */}
-                    <div className="p-3.5 rounded-2xl bg-teal-500/5 dark:bg-teal-950/20 border border-teal-500/20 space-y-2">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
-                          <Calendar className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                          <span>Condition Onset Date</span>
-                        </label>
-                        <span className="text-[10px] text-teal-600 dark:text-teal-400 font-medium">Quick Shortcuts</span>
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <input
-                          type="date"
-                          name="ageOfDiagnosis"
-                          value={formData.ageOfDiagnosis}
-                          onChange={handleChange}
-                          className="h-9 px-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111719] text-xs font-semibold outline-none focus:ring-2 focus:ring-teal-500"
-                        />
-                        {[
-                          { label: 'Today', days: 0 },
-                          { label: '1 Wk Ago', days: -7 },
-                          { label: '1 Mo Ago', months: -1 },
-                          { label: '6 Mos Ago', months: -6 },
-                        ].map((btn, i) => (
                           <button
-                            key={i}
                             type="button"
                             onClick={() => {
-                              const d = new Date();
-                              if (btn.days !== undefined) d.setDate(d.getDate() + btn.days);
-                              if (btn.months !== undefined) d.setMonth(d.getMonth() + btn.months);
-                              setFormData(prev => ({ ...prev, ageOfDiagnosis: d.toISOString().split('T')[0] }));
+                              setSelectedPatient(null);
+                              setShowNewChart(false);
                             }}
-                            className="px-2.5 py-1 text-[11px] font-semibold rounded-lg bg-white dark:bg-[#161d20] border border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-300 hover:bg-teal-50 hover:text-teal-600 transition-colors cursor-pointer"
+                            className="px-3.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#161d20] text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition cursor-pointer self-start sm:self-center"
                           >
-                            {btn.label}
+                            Change Patient
                           </button>
-                        ))}
-                      </div>
-                    </div>
+                        </div>
 
-                    {/* Medical History */}
-                    <div>
-                      <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
-                        Past Medical History & Chronic Illnesses
-                      </label>
-                      <textarea
-                        name="pastMedicalHistory"
-                        value={formData.pastMedicalHistory}
-                        onChange={handleChange}
-                        rows={2}
-                        placeholder="e.g. Hypertension, Diabetes, Asthma, Hepatitis, Bleeding disorders..."
-                        className="w-full p-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#141b1e] text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
-                      />
-                    </div>
+                        {/* 2. Previous Documented Teeth Record */}
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs sm:text-sm font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                              <ToothIcon className="w-4 h-4 text-[#008294]" />
+                              <span>Previous Documented Teeth ({prevDiagnosedTeeth.length})</span>
+                            </label>
+                            <span className="text-[11px] text-gray-400">
+                              Documented in previous visits
+                            </span>
+                          </div>
 
-                    {/* Drug History */}
-                    <div>
-                      <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
-                        Drug History & Known Allergies
-                      </label>
-                      <textarea
-                        name="drugHistory"
-                        value={formData.drugHistory}
-                        onChange={handleChange}
-                        rows={2}
-                        placeholder="e.g. Penicillin allergy, Aspirin, Blood thinners, Local anesthetic sensitivity..."
-                        className="w-full p-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#141b1e] text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
-                      />
-                    </div>
+                          {prevDiagnosedTeeth.length > 0 ? (
+                            <div className="grid grid-cols-1 gap-3">
+                              {prevDiagnosedTeeth.map(t => (
+                                <SingleToothDentalCard
+                                  key={t.toothId}
+                                  toothId={t.toothId}
+                                  condition={t.condition}
+                                  surfaces={t.surfaces}
+                                  notes={t.notes}
+                                  treatment={t.treatment}
+                                />
+                              ))}
+                            </div>
+                          ) : (
+                            <div className="p-4 rounded-xl bg-gray-50/60 dark:bg-[#141b1e] border border-dashed border-gray-200 dark:border-gray-800 text-center text-xs text-gray-400">
+                              No previous teeth were charted for this patient yet.
+                            </div>
+                          )}
 
-                    {/* Surgical History */}
-                    <div>
-                      <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
-                        Past Surgical & Dental History
-                      </label>
-                      <textarea
-                        name="pastSurgicalHistory"
-                        value={formData.pastSurgicalHistory}
-                        onChange={handleChange}
-                        rows={2}
-                        placeholder="e.g. Previous tooth extractions, implants, maxillofacial surgery..."
-                        className="w-full p-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#141b1e] text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* ── STEP 3: DENTITION CHART & TREATMENT ── */}
-                {currentStep === 3 && !isReception && (
-                  <div className="space-y-6">
-                    {/* Dentition Chart */}
-                    <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-2 sm:p-4 bg-gray-50/40 dark:bg-[#141b1e]/50">
-                      <DentitionChart
-                        value={formData.tableData}
-                        onChange={(newChartValue) => {
-                          setFormData(prev => ({
-                            ...prev,
-                            tableData: newChartValue
-                          }));
-                        }}
-                        patientAge={formData.dob}
-                        disabled={isLoading || formSubmitted}
-                        onScheduleTooth={(tooth) => {
-                          const toothId = typeof tooth === 'string' ? tooth : tooth.id;
-                          setSchedulerInitialToothId(toothId);
-                          setShowSchedulerModal(true);
-                        }}
-                      />
-                    </div>
-
-                    {/* Clinical Diagnoses derived from chart */}
-                    <div className="p-4 rounded-2xl bg-gray-50/60 dark:bg-[#141b1e] border border-gray-200 dark:border-gray-800 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
-                          <Stethoscope className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                          <span>Chart Findings ({diagnosedTeeth.length + generalDiagnoses.length})</span>
-                        </label>
-                      </div>
-
-                      {diagnosedTeeth.length > 0 ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {diagnosedTeeth.map(t => (
-                            <div
-                              key={t.toothId}
-                              className="flex items-center gap-2 p-2 rounded-xl bg-white dark:bg-[#161d20] border border-gray-100 dark:border-gray-800"
+                          {/* 3. The "New" Option Button to reveal full Dentition Chart */}
+                          {!showNewChart ? (
+                            <button
+                              type="button"
+                              onClick={() => setShowNewChart(true)}
+                              className="w-full mt-2 py-3.5 px-4 rounded-2xl border-2 border-dashed border-[#008294]/40 hover:border-[#008294] bg-teal-500/5 hover:bg-teal-500/10 text-[#008294] dark:text-teal-300 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 transition-all cursor-pointer shadow-xs"
                             >
-                              <span className="w-6 h-6 rounded-lg bg-[#008294] text-white font-bold text-[10px] flex items-center justify-center shrink-0">
-                                #{t.toothId}
-                              </span>
-                              <div className="min-w-0 flex-1">
-                                <div className="text-xs font-bold text-gray-900 dark:text-white truncate">
-                                  {t.name} <span className="text-gray-400 font-mono">({t.palmer})</span>
+                              <Plus className="w-4 h-4 text-[#008294]" />
+                              <span>+ New — Chart Teeth for Today&apos;s Visit</span>
+                            </button>
+                          ) : (
+                            <div className="space-y-4 pt-2">
+                              <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-2 sm:p-4 bg-gray-50/40 dark:bg-[#141b1e]/50">
+                                <div className="flex items-center justify-between mb-2 px-1">
+                                  <span className="text-xs font-bold text-gray-700 dark:text-gray-300 flex items-center gap-1.5">
+                                    <ToothIcon className="w-4 h-4 text-[#008294]" />
+                                    <span>Dentition Charting (Today&apos;s Visit)</span>
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => setShowNewChart(false)}
+                                    className="text-[11px] font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-white cursor-pointer"
+                                  >
+                                    Collapse Chart
+                                  </button>
                                 </div>
-                                <div className="text-[10px] text-teal-700 dark:text-teal-400 font-semibold">
-                                  {t.conditionLabel}{t.surfaces && t.surfaces.length > 0 ? ` · ${t.surfaces.join('')}` : ''}
+                                <DentitionChart
+                                  value={formData.tableData}
+                                  onChange={(newChartValue) => {
+                                    setFormData(prev => ({
+                                      ...prev,
+                                      tableData: newChartValue
+                                    }));
+                                  }}
+                                  patientAge={formData.dob}
+                                  disabled={isLoading || formSubmitted}
+                                  onScheduleTooth={(tooth) => {
+                                    const toothId = typeof tooth === 'string' ? tooth : tooth.id;
+                                    setSchedulerInitialToothId(toothId);
+                                    setShowSchedulerModal(true);
+                                  }}
+                                />
+                              </div>
+
+                              {/* Planned procedures for newly marked teeth */}
+                              {diagnosedTeeth.length > 0 && (
+                                <div className="p-4 rounded-2xl bg-gray-50/60 dark:bg-[#141b1e] border border-gray-200 dark:border-gray-800 space-y-3">
+                                  <label className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                                    <Activity className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                                    <span>Planned Procedure for Today&apos;s Diagnosed Teeth</span>
+                                  </label>
+                                  <div className="space-y-2">
+                                    {diagnosedTeeth.map(t => (
+                                      <div key={t.toothId} className="flex items-center gap-2">
+                                        <span className="w-7 text-xs font-mono font-bold text-[#008294]">#{t.toothId}</span>
+                                        <input
+                                          type="text"
+                                          value={toothTreatments[t.toothId] || t.treatment || ''}
+                                          onChange={e => {
+                                            const val = e.target.value;
+                                            setToothTreatments(prev => ({ ...prev, [t.toothId]: val }));
+                                          }}
+                                          placeholder={`Procedure for tooth #${t.toothId} (${t.conditionLabel})...`}
+                                          className="flex-1 h-9 px-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#161d20] text-xs text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-teal-500"
+                                        />
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 4. Treatment Payment (USD $) for Returning Patient */}
+                        {(() => {
+                          // Dynamic calculation incorporating any edits to past visits in real-time
+                          let baseHistoricalCost = 0;
+                          let baseHistoricalPaid = 0;
+
+                          if (patientVisits.length > 0) {
+                            patientVisits.forEach(v => {
+                              let vTable: any = {};
+                              try { if (v.table_data) vTable = JSON.parse(v.table_data); } catch {}
+                              const origCost = Number(v.total_cost ?? vTable.totalCost ?? (v as any).totalCost) || 0;
+                              const origPaid = Number(v.amount_paid ?? vTable.amountPaid ?? (v as any).amountPaid) || 0;
+                              const cost = editedVisitFinances[v.id]?.cost !== undefined ? (Number(editedVisitFinances[v.id].cost) || 0) : origCost;
+                              const paid = editedVisitFinances[v.id]?.paid !== undefined ? (Number(editedVisitFinances[v.id].paid) || 0) : origPaid;
+                              baseHistoricalCost += cost;
+                              baseHistoricalPaid += paid;
+                            });
+                          } else {
+                            const origCost = Number(selectedPatient.totalCost) || 0;
+                            const origPaid = Number(selectedPatient.amountPaid) || 0;
+                            baseHistoricalCost = editedVisitFinances['admission']?.cost !== undefined ? (Number(editedVisitFinances['admission'].cost) || 0) : origCost;
+                            baseHistoricalPaid = editedVisitFinances['admission']?.paid !== undefined ? (Number(editedVisitFinances['admission'].paid) || 0) : origPaid;
+                          }
+
+                          const historicalTotalBilled = baseHistoricalCost;
+                          const historicalAmountPaid = baseHistoricalPaid;
+                          const historicalBalanceLeft = Math.max(0, historicalTotalBilled - historicalAmountPaid);
+
+                          const todayCostNum = Number(formData.totalCost) || 0;
+                          const todayPaidNum = Number(formData.amountPaid) || 0;
+                          const todayBalanceNum = Math.max(0, todayCostNum - todayPaidNum);
+
+                          const updatedTotalBalance = historicalBalanceLeft + todayBalanceNum;
+
+                          return (
+                            <div className="p-4 sm:p-5 rounded-2xl bg-teal-500/5 dark:bg-teal-950/20 border border-teal-500/20 space-y-4">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs sm:text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                  <CreditCard className="w-4 h-4 text-[#008294]" />
+                                  <span>Treatment Payment & Balance (USD $)</span>
+                                </span>
+                                <span className="text-[11px] font-semibold text-teal-700 dark:text-teal-400">
+                                  {patientVisits.length} previous visit(s)
+                                </span>
+                              </div>
+
+                              {/* Historical Ledger Card */}
+                              <div className="grid grid-cols-3 gap-2.5 p-3 rounded-xl bg-white dark:bg-[#161d20] border border-gray-100 dark:border-gray-800 text-center">
+                                <div>
+                                  <span className="text-[10px] font-bold uppercase text-gray-400 block mb-0.5">Total Billed So Far</span>
+                                  <span className="text-xs sm:text-sm font-extrabold font-mono text-gray-900 dark:text-white">
+                                    ${historicalTotalBilled.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] font-bold uppercase text-gray-400 block mb-0.5">Total Paid So Far</span>
+                                  <span className="text-xs sm:text-sm font-extrabold font-mono text-teal-600 dark:text-teal-400">
+                                    ${historicalAmountPaid.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </span>
+                                </div>
+                                <div>
+                                  <span className="text-[10px] font-bold uppercase text-gray-400 block mb-0.5">Previous Balance Due</span>
+                                  <span className={`text-xs sm:text-sm font-extrabold font-mono ${historicalBalanceLeft > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500'}`}>
+                                    ${historicalBalanceLeft.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </span>
                                 </div>
                               </div>
+
+                              {/* Visits History Breakdown (Paid / Total Money per Visit) */}
+                              <div className="space-y-2 pt-1">
+                                <div className="flex items-center justify-between flex-wrap gap-1">
+                                  <span className="text-[11px] font-bold uppercase tracking-wider text-teal-800 dark:text-teal-300">
+                                    Visits History Breakdown
+                                  </span>
+                                  <span className="text-[10px] text-gray-400">
+                                    Double-click money or click ✏️ to edit · Saved when you click Save Visit
+                                  </span>
+                                </div>
+
+                                <div className="space-y-1.5">
+                                  {patientVisits.length > 0 ? (
+                                    patientVisits.map((v, i) => {
+                                      const visitNum = patientVisits.length - i;
+                                      let vTable: any = {};
+                                      try { if (v.table_data) vTable = JSON.parse(v.table_data); } catch {}
+                                      const origCost = Number(v.total_cost ?? vTable.totalCost ?? (v as any).totalCost) || 0;
+                                      const origPaid = Number(v.amount_paid ?? vTable.amountPaid ?? (v as any).amountPaid) || 0;
+                                      
+                                      const isEditing = editingVisitId === v.id;
+                                      const curPaidStr = editedVisitFinances[v.id]?.paid ?? String(origPaid);
+                                      const curCostStr = editedVisitFinances[v.id]?.cost ?? String(origCost);
+                                      const effPaid = editedVisitFinances[v.id]?.paid !== undefined ? (Number(editedVisitFinances[v.id].paid) || 0) : origPaid;
+                                      const effCost = editedVisitFinances[v.id]?.cost !== undefined ? (Number(editedVisitFinances[v.id].cost) || 0) : origCost;
+                                      const effDue = Math.max(0, effCost - effPaid);
+                                      const hasBeenModified = editedVisitFinances[v.id] !== undefined;
+
+                                      const dateStr = v.visited_at 
+                                        ? new Date(v.visited_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+                                        : '';
+
+                                      return (
+                                        <div
+                                          key={v.id || i}
+                                          className="p-3 rounded-xl bg-white dark:bg-[#161d20] border border-gray-100 dark:border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-xs"
+                                        >
+                                          <div className="flex items-center gap-2.5">
+                                            <span className="w-6 h-6 rounded-lg bg-teal-500/10 text-[#008294] dark:text-teal-400 font-bold text-xs flex items-center justify-center shrink-0">
+                                              {visitNum}
+                                            </span>
+                                            <div>
+                                              <div className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                                <span>Visit {visitNum}</span>
+                                                {dateStr && <span className="text-[10px] font-normal text-gray-400">• {dateStr}</span>}
+                                                {hasBeenModified && (
+                                                  <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.2 rounded">
+                                                    Edited
+                                                  </span>
+                                                )}
+                                              </div>
+                                              {v.treatment && (
+                                                <p className="text-[11px] text-gray-500 dark:text-gray-400 truncate max-w-xs sm:max-w-md">
+                                                  {v.treatment}
+                                                </p>
+                                              )}
+                                            </div>
+                                          </div>
+
+                                          {/* Money Paid / Total Money: Double click to edit */}
+                                          {isEditing ? (
+                                            <div className="flex items-center gap-1.5 font-mono self-end sm:self-center">
+                                              <div className="flex items-center gap-1 bg-teal-500/10 dark:bg-teal-950/30 px-2 py-1 rounded-lg border border-teal-500/30">
+                                                <span className="text-[10px] text-teal-800 dark:text-teal-300 font-bold">Paid: $</span>
+                                                <input
+                                                  type="number"
+                                                  step="any"
+                                                  value={curPaidStr}
+                                                  onChange={e => {
+                                                    const val = e.target.value;
+                                                    setEditedVisitFinances(prev => ({
+                                                      ...prev,
+                                                      [v.id]: { cost: prev[v.id]?.cost ?? String(origCost), paid: val }
+                                                    }));
+                                                  }}
+                                                  autoFocus
+                                                  className="w-16 h-6 px-1 text-xs font-bold font-mono bg-white dark:bg-[#111719] text-gray-900 dark:text-white rounded border border-gray-200 dark:border-gray-700 outline-none focus:ring-1 focus:ring-teal-500"
+                                                />
+                                              </div>
+                                              <span className="text-gray-400 font-bold text-xs">/</span>
+                                              <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800/80 px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700">
+                                                <span className="text-[10px] text-gray-600 dark:text-gray-400 font-bold">Total: $</span>
+                                                <input
+                                                  type="number"
+                                                  step="any"
+                                                  value={curCostStr}
+                                                  onChange={e => {
+                                                    const val = e.target.value;
+                                                    setEditedVisitFinances(prev => ({
+                                                      ...prev,
+                                                      [v.id]: { cost: val, paid: prev[v.id]?.paid ?? String(origPaid) }
+                                                    }));
+                                                  }}
+                                                  className="w-16 h-6 px-1 text-xs font-bold font-mono bg-white dark:bg-[#111719] text-gray-900 dark:text-white rounded border border-gray-200 dark:border-gray-700 outline-none focus:ring-1 focus:ring-teal-500"
+                                                />
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={() => setEditingVisitId(null)}
+                                                title="Done editing (saved when you click Save Visit)"
+                                                className="px-2 py-1 rounded-lg bg-[#008294] hover:bg-[#006e7d] text-white text-[11px] font-bold shadow-xs transition cursor-pointer flex items-center gap-1"
+                                              >
+                                                <Check className="w-3.5 h-3.5" />
+                                                <span>Done</span>
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <div
+                                              onDoubleClick={() => {
+                                                setEditingVisitId(v.id);
+                                                if (!editedVisitFinances[v.id]) {
+                                                  setEditedVisitFinances(prev => ({
+                                                    ...prev,
+                                                    [v.id]: { cost: String(origCost), paid: String(origPaid) }
+                                                  }));
+                                                }
+                                              }}
+                                              className="flex items-center gap-2 self-end sm:self-center font-mono cursor-pointer group select-none"
+                                              title="Double-click to edit payment (or click the pencil icon)"
+                                            >
+                                              <span className="text-xs font-bold text-teal-600 dark:text-teal-400 group-hover:underline">
+                                                ${effPaid.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                              </span>
+                                              <span className="text-gray-400 text-xs font-bold">/</span>
+                                              <span className="text-xs font-bold text-gray-900 dark:text-white group-hover:underline">
+                                                ${effCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                              </span>
+                                              {effDue > 0 ? (
+                                                <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full ml-1">
+                                                  Due: ${effDue.toFixed(2)}
+                                                </span>
+                                              ) : (
+                                                <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full ml-1">
+                                                  Paid
+                                                </span>
+                                              )}
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setEditingVisitId(v.id);
+                                                  if (!editedVisitFinances[v.id]) {
+                                                    setEditedVisitFinances(prev => ({
+                                                      ...prev,
+                                                      [v.id]: { cost: String(origCost), paid: String(origPaid) }
+                                                    }));
+                                                  }
+                                                }}
+                                                className="opacity-40 group-hover:opacity-100 hover:text-[#008294] text-gray-400 transition p-1 cursor-pointer"
+                                                title="Click to edit payment"
+                                              >
+                                                <Pencil className="w-3 h-3" />
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })
+                                  ) : (
+                                    /* Initial visit / admission record */
+                                    (() => {
+                                      const isEditingAdm = editingVisitId === 'admission';
+                                      const admOrigCost = Number(selectedPatient.totalCost) || 0;
+                                      const admOrigPaid = Number(selectedPatient.amountPaid) || 0;
+                                      const curPaidStr = editedVisitFinances['admission']?.paid ?? String(admOrigPaid);
+                                      const curCostStr = editedVisitFinances['admission']?.cost ?? String(admOrigCost);
+                                      const effPaid = editedVisitFinances['admission']?.paid !== undefined ? (Number(editedVisitFinances['admission'].paid) || 0) : admOrigPaid;
+                                      const effCost = editedVisitFinances['admission']?.cost !== undefined ? (Number(editedVisitFinances['admission'].cost) || 0) : admOrigCost;
+                                      const effDue = Math.max(0, effCost - effPaid);
+                                      const hasBeenModified = editedVisitFinances['admission'] !== undefined;
+
+                                      return (
+                                        <div className="p-3 rounded-xl bg-white dark:bg-[#161d20] border border-gray-100 dark:border-gray-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-xs">
+                                          <div className="flex items-center gap-2.5">
+                                            <span className="w-6 h-6 rounded-lg bg-teal-500/10 text-[#008294] dark:text-teal-400 font-bold text-xs flex items-center justify-center shrink-0">
+                                              1
+                                            </span>
+                                            <div>
+                                              <div className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                                                <span>Visit 1 (Initial Admission)</span>
+                                                {hasBeenModified && (
+                                                  <span className="text-[9px] font-bold text-amber-600 dark:text-amber-400 bg-amber-500/15 border border-amber-500/30 px-1.5 py-0.2 rounded">
+                                                    Edited
+                                                  </span>
+                                                )}
+                                              </div>
+                                              <p className="text-[11px] text-gray-500 dark:text-gray-400">
+                                                {selectedPatient.treatment || 'Initial Consultation & Admission'}
+                                              </p>
+                                            </div>
+                                          </div>
+
+                                          {isEditingAdm ? (
+                                            <div className="flex items-center gap-1.5 font-mono self-end sm:self-center">
+                                              <div className="flex items-center gap-1 bg-teal-500/10 dark:bg-teal-950/30 px-2 py-1 rounded-lg border border-teal-500/30">
+                                                <span className="text-[10px] text-teal-800 dark:text-teal-300 font-bold">Paid: $</span>
+                                                <input
+                                                  type="number"
+                                                  step="any"
+                                                  value={curPaidStr}
+                                                  onChange={e => {
+                                                    const val = e.target.value;
+                                                    setEditedVisitFinances(prev => ({
+                                                      ...prev,
+                                                      admission: { cost: prev.admission?.cost ?? String(admOrigCost), paid: val }
+                                                    }));
+                                                  }}
+                                                  autoFocus
+                                                  className="w-16 h-6 px-1 text-xs font-bold font-mono bg-white dark:bg-[#111719] text-gray-900 dark:text-white rounded border border-gray-200 dark:border-gray-700 outline-none focus:ring-1 focus:ring-teal-500"
+                                                />
+                                              </div>
+                                              <span className="text-gray-400 font-bold text-xs">/</span>
+                                              <div className="flex items-center gap-1 bg-gray-100 dark:bg-gray-800/80 px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700">
+                                                <span className="text-[10px] text-gray-600 dark:text-gray-400 font-bold">Total: $</span>
+                                                <input
+                                                  type="number"
+                                                  step="any"
+                                                  value={curCostStr}
+                                                  onChange={e => {
+                                                    const val = e.target.value;
+                                                    setEditedVisitFinances(prev => ({
+                                                      ...prev,
+                                                      admission: { cost: val, paid: prev.admission?.paid ?? String(admOrigPaid) }
+                                                    }));
+                                                  }}
+                                                  className="w-16 h-6 px-1 text-xs font-bold font-mono bg-white dark:bg-[#111719] text-gray-900 dark:text-white rounded border border-gray-200 dark:border-gray-700 outline-none focus:ring-1 focus:ring-teal-500"
+                                                />
+                                              </div>
+                                              <button
+                                                type="button"
+                                                onClick={() => setEditingVisitId(null)}
+                                                title="Done editing (saved when you click Save Visit)"
+                                                className="px-2 py-1 rounded-lg bg-[#008294] hover:bg-[#006e7d] text-white text-[11px] font-bold shadow-xs transition cursor-pointer flex items-center gap-1"
+                                              >
+                                                <Check className="w-3.5 h-3.5" />
+                                                <span>Done</span>
+                                              </button>
+                                            </div>
+                                          ) : (
+                                            <div
+                                              onDoubleClick={() => {
+                                                setEditingVisitId('admission');
+                                                if (!editedVisitFinances['admission']) {
+                                                  setEditedVisitFinances(prev => ({
+                                                    ...prev,
+                                                    admission: { cost: String(admOrigCost), paid: String(admOrigPaid) }
+                                                  }));
+                                                }
+                                              }}
+                                              className="flex items-center gap-2 self-end sm:self-center font-mono cursor-pointer group select-none"
+                                              title="Double-click to edit payment (or click the pencil icon)"
+                                            >
+                                              <span className="text-xs font-bold text-teal-600 dark:text-teal-400 group-hover:underline">
+                                                ${effPaid.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                              </span>
+                                              <span className="text-gray-400 text-xs font-bold">/</span>
+                                              <span className="text-xs font-bold text-gray-900 dark:text-white group-hover:underline">
+                                                ${effCost.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                              </span>
+                                              {effDue > 0 ? (
+                                                <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full ml-1">
+                                                  Due: ${effDue.toFixed(2)}
+                                                </span>
+                                              ) : (
+                                                <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full ml-1">
+                                                  Paid
+                                                </span>
+                                              )}
+                                              <button
+                                                type="button"
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setEditingVisitId('admission');
+                                                  if (!editedVisitFinances['admission']) {
+                                                    setEditedVisitFinances(prev => ({
+                                                      ...prev,
+                                                      admission: { cost: String(admOrigCost), paid: String(admOrigPaid) }
+                                                    }));
+                                                  }
+                                                }}
+                                                className="opacity-40 group-hover:opacity-100 hover:text-[#008294] text-gray-400 transition p-1 cursor-pointer"
+                                                title="Click to edit payment"
+                                              >
+                                                <Pencil className="w-3 h-3" />
+                                              </button>
+                                            </div>
+                                          )}
+                                        </div>
+                                      );
+                                    })()
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Today's New Treatment Payment Inputs */}
+                              <div className="pt-1">
+                                <span className="text-[11px] font-bold uppercase tracking-wider text-teal-800 dark:text-teal-300 block mb-2">
+                                  Today&apos;s Treatment Payment
+                                </span>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block text-[11px] font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                                      New Treatment Cost ($)
+                                    </label>
+                                    <input
+                                      type="text"
+                                      name="totalCost"
+                                      value={formData.totalCost}
+                                      onChange={handleChange}
+                                      placeholder="0.00"
+                                      className="h-10 w-full px-3.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#161d20] text-xs font-mono font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-[11px] font-semibold text-gray-700 dark:text-gray-300 mb-1">
+                                      Amount Paid Today ($)
+                                    </label>
+                                    <input
+                                      type="text"
+                                      name="amountPaid"
+                                      value={formData.amountPaid}
+                                      onChange={handleChange}
+                                      placeholder="0.00"
+                                      className="h-10 w-full px-3.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#161d20] text-xs font-mono font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
+                                    />
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Real-time Resulting Balance Preview */}
+                              {(todayCostNum > 0 || todayPaidNum > 0) && (
+                                <div className="p-3 rounded-xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-between text-xs font-semibold">
+                                  <span className="text-teal-900 dark:text-teal-200">New Total Outstanding Balance:</span>
+                                  <span className="font-mono font-bold text-sm text-[#008294] dark:text-teal-300">
+                                    ${updatedTotalBalance.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                                  </span>
+                                </div>
+                              )}
                             </div>
-                          ))}
+                          );
+                        })()}
+
+                        {/* 5. Clinical notes for today's visit */}
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
+                            Visit Clinical Notes & Prescriptions
+                          </label>
+                          <textarea
+                            name="note"
+                            value={formData.note}
+                            onChange={handleChange}
+                            rows={3}
+                            placeholder="Enter findings, treatment notes, prescriptions, or follow-up instructions..."
+                            className="w-full p-3.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#141b1e] text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500 resize-none"
+                          />
                         </div>
-                      ) : (
-                        <p className="text-[11px] text-gray-400 dark:text-gray-500">
-                          Click any tooth in the chart above to mark caries, restorations, RCT, etc.
-                        </p>
-                      )}
 
-                      {/* General diagnoses / tags */}
-                      <div className="flex items-center gap-2 pt-1">
-                        <input
-                          type="text"
-                          value={customDiagnosisInput}
-                          onChange={e => setCustomDiagnosisInput(e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              if (customDiagnosisInput.trim()) {
-                                setGeneralDiagnoses(prev => [...prev, customDiagnosisInput.trim()]);
-                                setCustomDiagnosisInput('');
-                              }
-                            }
-                          }}
-                          placeholder="Add general finding (e.g. Gingivitis) & press Enter..."
-                          className="flex-1 text-xs px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#161d20] text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-teal-500"
-                        />
-                        {customDiagnosisInput.trim() && (
+                        {/* 6. Dedicated Submit Button for Returning Patient */}
+                        <div className="pt-2 flex justify-end">
                           <button
-                            type="button"
-                            onClick={() => {
-                              setGeneralDiagnoses(prev => [...prev, customDiagnosisInput.trim()]);
-                              setCustomDiagnosisInput('');
-                            }}
-                            className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-[#008294] text-white cursor-pointer"
+                            type="submit"
+                            disabled={isLoading || formSubmitted}
+                            className="w-full sm:w-auto px-8 py-3 rounded-full bg-[#008294] hover:bg-[#006e7d] text-white text-xs sm:text-sm font-bold shadow-md shadow-teal-500/25 transition-all cursor-pointer flex items-center justify-center gap-2"
                           >
-                            Add
+                            {isLoading ? (
+                              <>
+                                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                <span>Saving Visit Record...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Check className="w-4 h-4" />
+                                <span>Save Visit & Record Treatment</span>
+                              </>
+                            )}
                           </button>
-                        )}
+                        </div>
                       </div>
-                    </div>
+                    )}
+                  </div>
+                ) : (
+                  /* ══════════════════════════════════════════════════════════════════
+                      MODE: NEW PATIENT (3-STEP WIZARD)
+                     ══════════════════════════════════════════════════════════════════ */
+                  <>
+                    {/* ── STEP 1: PERSONAL DETAILS ── */}
+                    {currentStep === 1 && (
+                      <div className="space-y-4">
+                        {/* Full Name */}
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
+                            Patient Full Name <span className="text-red-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            name="name"
+                            value={formData.name}
+                            onChange={handleChange}
+                            onBlur={() => {
+                              setFormData(prev => ({
+                                ...prev,
+                                name: normalizeFullNameOnBlur(prev.name)
+                              }));
+                            }}
+                            required
+                            disabled={isLoading || formSubmitted}
+                            placeholder="e.g. Mumin Muhammed Ghareeb"
+                            className="h-11 w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#141b1e] px-4 text-xs font-semibold text-gray-900 dark:text-white outline-none focus:bg-white dark:focus:bg-[#161d20] focus:ring-2 focus:ring-teal-500 transition-all placeholder:text-gray-400"
+                          />
+                        </div>
 
-                    {/* Tooth-specific treatment planner */}
-                    {diagnosedTeeth.length > 0 && (
-                      <div className="p-4 rounded-2xl bg-gray-50/60 dark:bg-[#141b1e] border border-gray-200 dark:border-gray-800 space-y-3">
-                        <label className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
-                          <Activity className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                          <span>Planned Procedure per Diagnosed Tooth</span>
-                        </label>
-                        <div className="space-y-2">
-                          {diagnosedTeeth.map(t => (
-                            <div key={t.toothId} className="flex items-center gap-2">
-                              <span className="w-7 text-xs font-mono font-bold text-[#008294]">#{t.toothId}</span>
+                        {/* Gender pill selector inspired by onboarding-setup.tsx */}
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-2">
+                            Gender
+                          </label>
+                          <div className="flex gap-2">
+                            {[
+                              { id: 'Male', label: 'Male' },
+                              { id: 'Female', label: 'Female' },
+                            ].map((opt) => {
+                              const active = formData.sex === opt.id;
+                              return (
+                                <button
+                                  key={opt.id}
+                                  type="button"
+                                  onClick={() => setFormData(prev => ({ ...prev, sex: opt.id }))}
+                                  className={`flex items-center gap-2 rounded-xl border-[1.5px] px-5 py-2.5 text-xs font-semibold transition-all cursor-pointer ${
+                                    active
+                                      ? 'border-teal-500/50 bg-teal-500/10 text-teal-700 dark:border-teal-500/60 dark:bg-teal-950/40 dark:text-teal-300 shadow-2xs'
+                                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 dark:border-gray-800 dark:bg-[#141b1e] dark:text-gray-400 dark:hover:border-gray-700'
+                                  }`}
+                                >
+                                  {active && <CheckCircle2 className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />}
+                                  {opt.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Grid: Age & Mobile Number */}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          <div>
+                            <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
+                              Age / Date of Birth
+                            </label>
+                            <input
+                              type="text"
+                              name="dob"
+                              value={formData.dob}
+                              onChange={handleChange}
+                              placeholder="e.g. 25, or 1999-04-12"
+                              className="h-10 w-full rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#141b1e] px-4 text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
+                              Mobile Number
+                            </label>
+                            <div className="relative">
+                              <Phone className="absolute inset-y-0 left-3.5 my-auto w-3.5 h-3.5 text-gray-400" />
                               <input
                                 type="text"
-                                value={toothTreatments[t.toothId] || ''}
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  setToothTreatments(prev => ({ ...prev, [t.toothId]: val }));
-                                }}
-                                placeholder={`Procedure for tooth #${t.toothId} (${t.conditionLabel})...`}
-                                className="flex-1 h-9 px-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#161d20] text-xs text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-teal-500"
+                                name="mobileNumber"
+                                value={formData.mobileNumber}
+                                onChange={handleChange}
+                                placeholder="e.g. 07510201840"
+                                className="h-10 w-full pl-9 pr-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#141b1e] text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
                               />
                             </div>
+                          </div>
+                        </div>
+
+                        {/* Reception Only: Direct Payment Fields on Step 1 */}
+                        {isReception && (
+                          <div className="p-4 rounded-2xl bg-teal-500/5 dark:bg-teal-950/20 border border-teal-500/20 space-y-3 pt-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                                <CreditCard className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                                Admission Payment (USD)
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">Total Cost</label>
+                                <input
+                                  type="text"
+                                  name="totalCost"
+                                  value={formData.totalCost}
+                                  onChange={handleChange}
+                                  placeholder="0.00"
+                                  className="h-10 w-full px-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111719] text-xs font-mono font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">Amount Paid</label>
+                                <input
+                                  type="text"
+                                  name="amountPaid"
+                                  value={formData.amountPaid}
+                                  onChange={handleChange}
+                                  placeholder="0.00"
+                                  className="h-10 w-full px-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111719] text-xs font-mono font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ── STEP 2: MEDICAL HISTORY ── */}
+                    {currentStep === 2 && !isReception && (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5 flex items-center gap-1.5">
+                            <ShieldCheck className="w-4 h-4 text-teal-600 dark:text-teal-400" />
+                            <span>Medical History</span>
+                          </label>
+                          <textarea
+                            name="pastMedicalHistory"
+                            value={formData.pastMedicalHistory}
+                            onChange={handleChange}
+                            rows={7}
+                            placeholder="Enter patient medical history, chronic conditions, drug allergies, daily medications, and past surgical background..."
+                            className="w-full p-4 rounded-2xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#141b1e] text-xs sm:text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500 leading-relaxed resize-none shadow-xs"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ── STEP 3: DENTITION CHART & TREATMENT ── */}
+                    {currentStep === 3 && !isReception && (
+                      <div className="space-y-6">
+                        {/* Dentition Chart */}
+                        <div className="rounded-2xl border border-gray-200 dark:border-gray-800 p-2 sm:p-4 bg-gray-50/40 dark:bg-[#141b1e]/50">
+                          <DentitionChart
+                            value={formData.tableData}
+                            onChange={(newChartValue) => {
+                              setFormData(prev => ({
+                                ...prev,
+                                tableData: newChartValue
+                              }));
+                            }}
+                            patientAge={formData.dob}
+                            disabled={isLoading || formSubmitted}
+                            onScheduleTooth={(tooth) => {
+                              const toothId = typeof tooth === 'string' ? tooth : tooth.id;
+                              setSchedulerInitialToothId(toothId);
+                              setShowSchedulerModal(true);
+                            }}
+                          />
+                        </div>
+
+                        {/* Clinical Diagnoses derived from chart */}
+                        <div className="p-4 rounded-2xl bg-gray-50/60 dark:bg-[#141b1e] border border-gray-200 dark:border-gray-800 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                              <Stethoscope className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                              <span>Chart Findings ({diagnosedTeeth.length + generalDiagnoses.length})</span>
+                            </label>
+                          </div>
+
+                          {diagnosedTeeth.length > 0 ? (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                              {diagnosedTeeth.map(t => (
+                                <div
+                                  key={t.toothId}
+                                  className="flex items-center gap-2 p-2 rounded-xl bg-white dark:bg-[#161d20] border border-gray-100 dark:border-gray-800"
+                                >
+                                  <span className="w-6 h-6 rounded-lg bg-[#008294] text-white font-bold text-[10px] flex items-center justify-center shrink-0">
+                                    #{t.toothId}
+                                  </span>
+                                  <div className="min-w-0 flex-1">
+                                    <div className="text-xs font-bold text-gray-900 dark:text-white truncate">
+                                      {t.name} <span className="text-gray-400 font-mono">({t.palmer})</span>
+                                    </div>
+                                    <div className="text-[10px] text-teal-700 dark:text-teal-400 font-semibold">
+                                      {t.conditionLabel}{t.surfaces && t.surfaces.length > 0 ? ` · ${t.surfaces.join('')}` : ''}
+                                    </div>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                              Click any tooth in the chart above to mark caries, restorations, RCT, etc.
+                            </p>
+                          )}
+
+                          {/* General diagnoses / tags */}
+                          <div className="flex items-center gap-2 pt-1">
+                            <input
+                              type="text"
+                              value={customDiagnosisInput}
+                              onChange={e => setCustomDiagnosisInput(e.target.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  if (customDiagnosisInput.trim()) {
+                                    setGeneralDiagnoses(prev => [...prev, customDiagnosisInput.trim()]);
+                                    setCustomDiagnosisInput('');
+                                  }
+                                }
+                              }}
+                              placeholder="Add general finding (e.g. Gingivitis) & press Enter..."
+                              className="flex-1 text-xs px-3 py-1.5 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#161d20] text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-teal-500"
+                            />
+                            {customDiagnosisInput.trim() && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setGeneralDiagnoses(prev => [...prev, customDiagnosisInput.trim()]);
+                                  setCustomDiagnosisInput('');
+                                }}
+                                className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-[#008294] text-white cursor-pointer"
+                              >
+                                Add
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Tooth-specific treatment planner */}
+                        {diagnosedTeeth.length > 0 && (
+                          <div className="p-4 rounded-2xl bg-gray-50/60 dark:bg-[#141b1e] border border-gray-200 dark:border-gray-800 space-y-3">
+                            <label className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                              <Activity className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                              <span>Planned Procedure per Diagnosed Tooth</span>
+                            </label>
+                            <div className="space-y-2">
+                              {diagnosedTeeth.map(t => (
+                                <div key={t.toothId} className="flex items-center gap-2">
+                                  <span className="w-7 text-xs font-mono font-bold text-[#008294]">#{t.toothId}</span>
+                                  <input
+                                    type="text"
+                                    value={toothTreatments[t.toothId] || ''}
+                                    onChange={e => {
+                                      const val = e.target.value;
+                                      setToothTreatments(prev => ({ ...prev, [t.toothId]: val }));
+                                    }}
+                                    placeholder={`Procedure for tooth #${t.toothId} (${t.conditionLabel})...`}
+                                    className="flex-1 h-9 px-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#161d20] text-xs text-gray-900 dark:text-white outline-none focus:ring-1 focus:ring-teal-500"
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Billing Suite (USD) */}
+                        <div className="p-4 rounded-2xl bg-teal-500/5 dark:bg-teal-950/20 border border-teal-500/20 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
+                              <CreditCard className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
+                              <span>Treatment Payment (USD $)</span>
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">Total Cost</label>
+                              <input
+                                type="text"
+                                name="totalCost"
+                                value={formData.totalCost}
+                                onChange={handleChange}
+                                placeholder="0.00"
+                                className="h-10 w-full px-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111719] text-xs font-mono font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">Amount Paid</label>
+                              <input
+                                type="text"
+                                name="amountPaid"
+                                value={formData.amountPaid}
+                                onChange={handleChange}
+                                placeholder="0.00"
+                                className="h-10 w-full px-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111719] text-xs font-mono font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
+                              />
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Clinical Notes */}
+                        <div>
+                          <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
+                            Additional Clinical & Treatment Notes
+                          </label>
+                          <textarea
+                            name="note"
+                            value={formData.note}
+                            onChange={handleChange}
+                            rows={2}
+                            placeholder="e.g. Advised oral hygiene instructions, prescribed amoxicillin 500mg TDS, recall in 6 months..."
+                            className="w-full p-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#141b1e] text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
+                          />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Footer Navigation Bar for New Patient Mode */}
+                    <div className="mt-auto pt-6 border-t border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-3">
+                      {/* Step counter & pills */}
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                          STEP {currentStep} / {totalSteps}
+                        </span>
+                        <div className="ml-2 flex gap-1">
+                          {Array.from({ length: totalSteps }).map((_, i) => (
+                            <span
+                              key={i}
+                              className={`h-4 w-1.5 rounded-full transition-colors ${
+                                i + 1 <= currentStep ? 'bg-[#008294]' : 'bg-gray-200 dark:bg-gray-800'
+                              }`}
+                            />
                           ))}
                         </div>
                       </div>
-                    )}
 
-                    {/* Billing Suite (USD) */}
-                    <div className="p-4 rounded-2xl bg-teal-500/5 dark:bg-teal-950/20 border border-teal-500/20 space-y-3">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-gray-900 dark:text-white flex items-center gap-1.5">
-                          <CreditCard className="w-3.5 h-3.5 text-teal-600 dark:text-teal-400" />
-                          <span>Treatment Payment (USD $)</span>
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">Total Cost</label>
-                          <input
-                            type="text"
-                            name="totalCost"
-                            value={formData.totalCost}
-                            onChange={handleChange}
-                            placeholder="0.00"
-                            className="h-10 w-full px-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111719] text-xs font-mono font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-[11px] font-semibold text-gray-600 dark:text-gray-400 mb-1">Amount Paid</label>
-                          <input
-                            type="text"
-                            name="amountPaid"
-                            value={formData.amountPaid}
-                            onChange={handleChange}
-                            placeholder="0.00"
-                            className="h-10 w-full px-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-white dark:bg-[#111719] text-xs font-mono font-bold text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
-                          />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Clinical Notes */}
-                    <div>
-                      <label className="block text-xs font-bold text-gray-700 dark:text-gray-300 mb-1.5">
-                        Additional Clinical & Treatment Notes
-                      </label>
-                      <textarea
-                        name="note"
-                        value={formData.note}
-                        onChange={handleChange}
-                        rows={2}
-                        placeholder="e.g. Advised oral hygiene instructions, prescribed amoxicillin 500mg TDS, recall in 6 months..."
-                        className="w-full p-3 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-[#141b1e] text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-teal-500"
-                      />
-                    </div>
-                  </div>
-                )}
-
-                {/* Footer Navigation Bar inspired by onboarding-setup.tsx */}
-                <div className="mt-auto pt-6 border-t border-gray-100 dark:border-gray-800 flex flex-wrap items-center justify-between gap-3">
-                  
-                  {/* Step counter & pills */}
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-bold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                      STEP {currentStep} / {totalSteps}
-                    </span>
-                    <div className="ml-2 flex gap-1">
-                      {Array.from({ length: totalSteps }).map((_, i) => (
-                        <span
-                          key={i}
-                          className={`h-4 w-1.5 rounded-full transition-colors ${
-                            i + 1 <= currentStep ? 'bg-[#008294]' : 'bg-gray-200 dark:bg-gray-800'
-                          }`}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Action buttons */}
-                  <div className="flex items-center gap-2">
-                    {currentStep > 1 && (
-                      <button
-                        type="button"
-                        onClick={prevStep}
-                        className="h-10 px-4 rounded-full border border-gray-200 dark:border-gray-800 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition cursor-pointer flex items-center gap-1"
-                      >
-                        <ArrowLeft className="w-3.5 h-3.5" />
-                        <span>Back</span>
-                      </button>
-                    )}
-
-                    {currentStep < totalSteps ? (
-                      <motion.button
-                        key="continue-btn"
-                        type="button"
-                        whileHover={{ scale: 1.03 }}
-                        whileTap={{ scale: 0.97 }}
-                        onClick={nextStep}
-                        className="h-10 px-6 rounded-full bg-[#008294] hover:bg-[#006e7d] text-white text-xs font-semibold shadow-md shadow-teal-500/20 transition-all cursor-pointer flex items-center gap-1.5"
-                      >
-                        <span>Continue</span>
-                        <ChevronRight className="w-3.5 h-3.5" />
-                      </motion.button>
-                    ) : (
-                      <motion.button
-                        key="submit-btn"
-                        type="submit"
-                        disabled={isLoading || formSubmitted || !formData.name.trim()}
-                        whileHover={{ scale: 1.03 }}
-                        whileTap={{ scale: 0.97 }}
-                        className="h-10 px-7 rounded-full bg-[#008294] hover:bg-[#006e7d] text-white text-xs font-bold shadow-md shadow-teal-500/25 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2"
-                      >
-                        {isLoading ? (
-                          <>
-                            <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            <span>Saving Patient...</span>
-                          </>
-                        ) : (
-                          <>
-                            <CheckCircle2 className="w-4 h-4" />
-                            <span>Register Patient</span>
-                          </>
+                      {/* Action buttons */}
+                      <div className="flex items-center gap-2">
+                        {currentStep > 1 && (
+                          <button
+                            type="button"
+                            onClick={prevStep}
+                            className="h-10 px-4 rounded-full border border-gray-200 dark:border-gray-800 text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition cursor-pointer flex items-center gap-1"
+                          >
+                            <ArrowLeft className="w-3.5 h-3.5" />
+                            <span>Back</span>
+                          </button>
                         )}
-                      </motion.button>
-                    )}
-                  </div>
-                </div>
+
+                        {currentStep < totalSteps ? (
+                          <motion.button
+                            key="continue-btn"
+                            type="button"
+                            whileHover={{ scale: 1.03 }}
+                            whileTap={{ scale: 0.97 }}
+                            onClick={nextStep}
+                            className="h-10 px-6 rounded-full bg-[#008294] hover:bg-[#006e7d] text-white text-xs font-semibold shadow-md shadow-teal-500/20 transition-all cursor-pointer flex items-center gap-1.5"
+                          >
+                            <span>Continue</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </motion.button>
+                        ) : (
+                          <motion.button
+                            key="submit-btn"
+                            type="submit"
+                            disabled={isLoading || formSubmitted || !formData.name.trim()}
+                            whileHover={{ scale: 1.03 }}
+                            whileTap={{ scale: 0.97 }}
+                            className="h-10 px-7 rounded-full bg-[#008294] hover:bg-[#006e7d] text-white text-xs font-bold shadow-md shadow-teal-500/25 transition-all disabled:opacity-50 cursor-pointer flex items-center gap-2"
+                          >
+                            {isLoading ? (
+                              <>
+                                <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                                <span>Saving Patient...</span>
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 className="w-4 h-4" />
+                                <span>Register Patient</span>
+                              </>
+                            )}
+                          </motion.button>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )}
 
               </form>
             </div>

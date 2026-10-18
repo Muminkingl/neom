@@ -84,47 +84,17 @@ export default function PatientMedicalTab({ patient, onSaveMedical }: PatientMed
             />
           </div>
 
-          {/* Past Medical History */}
+          {/* Medical History */}
           <div className="space-y-2">
             <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
               <ShieldAlert className="size-3.5 text-[#008294]" />
-              <span>Past Medical History & Systemic Conditions</span>
+              <span>Medical History</span>
             </label>
             <textarea
-              rows={4}
+              rows={6}
               value={pastMedicalHistory}
               onChange={(e) => setPastMedicalHistory(e.target.value)}
-              placeholder="Diabetes, hypertension, heart conditions, allergies, bleeding disorders..."
-              className="w-full p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:ring-2 focus:ring-[#008294] focus:outline-hidden resize-none"
-            />
-          </div>
-
-          {/* Drug & Medication History */}
-          <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-              <Pill className="size-3.5 text-[#008294]" />
-              <span>Current Medications & Drug History</span>
-            </label>
-            <textarea
-              rows={4}
-              value={drugHistory}
-              onChange={(e) => setDrugHistory(e.target.value)}
-              placeholder="Anticoagulants, bisphosphonates, antibiotics, daily medications..."
-              className="w-full p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:ring-2 focus:ring-[#008294] focus:outline-hidden resize-none"
-            />
-          </div>
-
-          {/* Past Surgical History */}
-          <div className="space-y-2">
-            <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center gap-1.5">
-              <Scissors className="size-3.5 text-[#008294]" />
-              <span>Past Surgical & Anesthetic History</span>
-            </label>
-            <textarea
-              rows={4}
-              value={pastSurgicalHistory}
-              onChange={(e) => setPastSurgicalHistory(e.target.value)}
-              placeholder="Prior oral or systemic surgeries, complications with local anesthesia..."
+              placeholder="Diabetes, hypertension, heart conditions, allergies, medications, bleeding disorders, past surgical history..."
               className="w-full p-3.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-900 dark:text-white text-xs sm:text-sm focus:ring-2 focus:ring-[#008294] focus:outline-hidden resize-none"
             />
           </div>

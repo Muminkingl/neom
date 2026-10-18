@@ -61,6 +61,8 @@ export interface DiagnosedTooth {
   conditionLabel: string;
   surfaces: ToothSurface[];
   notes?: string;
+  treatment?: string;
+  price?: number | string;
 }
 
 export const CONDITION_CONFIG: Record<ToothCondition, {
@@ -84,6 +86,12 @@ export const CONDITION_CONFIG: Record<ToothCondition, {
 // Lower: L32-L17 = FDI 48,47,46,45,44,43,42,41,31,32,33,34,35,36,37,38
 export const UPPER_FDI: string[] = ['18','17','16','15','14','13','12','11','21','22','23','24','25','26','27','28'];
 export const LOWER_FDI: string[] = ['48','47','46','45','44','43','42','41','31','32','33','34','35','36','37','38'];
+
+// Pediatric / Deciduous teeth definitions (20 teeth total, 10 upper, 10 lower)
+export const UPPER_DECIDUOUS_FDI: string[] = ['55', '54', '53', '52', '51', '61', '62', '63', '64', '65'];
+export const UPPER_DECIDUOUS_PALMER: string[] = ['E┘', 'D┘', 'C┘', 'B┘', 'A┘', '└A', '└B', '└C', '└D', '└E'];
+export const LOWER_DECIDUOUS_FDI: string[] = ['85', '84', '83', '82', '81', '71', '72', '73', '74', '75'];
+export const LOWER_DECIDUOUS_PALMER: string[] = ['E┐', 'D┐', 'C┐', 'B┐', 'A┐', '┌A', '┌B', '┌C', '┌D', '┌E'];
 
 // Universal numbers shown in UI
 export const UPPER_UNIV: string[] = ['01','02','03','04','05','06','07','08','09','10','11','12','13','14','15','16'];
@@ -165,6 +173,8 @@ export function extractDiagnosedTeeth(tableDataStr?: string | null): DiagnosedTo
           palmer: coord ? coord.palmer : `#${id}`, condition: t.condition,
           conditionLabel: CONDITION_CONFIG[t.condition]?.label || t.condition,
           surfaces: t.surfaces || [], notes: t.notes || '',
+          treatment: (t as any).treatment || '',
+          price: (t as any).price || '',
         };
       });
   } catch { return []; }
@@ -197,10 +207,10 @@ export function parseEffectiveAge(input: string | number | undefined | null): nu
 // viewBox per tooth: 0 0 60 120
 // ==========================================
 
-type ToothType = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+export type ToothType = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
 // Returns the tooth type index (0-7) from position index (0-15)
-function getToothType(posIdx: number): ToothType {
+export function getToothType(posIdx: number): ToothType {
   // posIdx 0-15, symmetrical: 0=wisdom(8), 1=2ndMolar(7), 2=1stMolar(6), 3=2ndPremolar(5),
   //                            4=1stPremolar(4), 5=canine(3), 6=lateral(2), 7=central(1)
   // then mirror for 8-15
@@ -208,7 +218,16 @@ function getToothType(posIdx: number): ToothType {
   return (7 - p) as ToothType;
 }
 
-interface ToothSvgProps {
+// Returns the pediatric tooth type index (0-7) from position index (0-9)
+export function getPediatricToothType(posIdx: number): ToothType {
+  // 5 teeth per quadrant: 2nd molar, 1st molar, canine, lateral, central
+  // posIdx 0-4: E (2nd molar: 1), D (1st molar: 2), C (canine: 5), B (lateral: 6), A (central: 7)
+  // posIdx 5-9: A (central: 7), B (lateral: 6), C (canine: 5), D (1st molar: 2), E (2nd molar: 1)
+  const map: ToothType[] = [1, 2, 5, 6, 7, 7, 6, 5, 2, 1];
+  return map[posIdx] ?? 7;
+}
+
+export interface ToothSvgProps {
   type: ToothType;
   arch: 'upper' | 'lower';
   condition: ToothCondition;
@@ -279,7 +298,7 @@ function getCrownPath(type: ToothType, arch: 'upper' | 'lower'): { crown: string
   }
 }
 
-function ToothSvg({ type, arch, condition, isHovered, isSelected, isScheduled, isMissing, readOnly, onClick, onMouseEnter, onMouseLeave, label }: ToothSvgProps) {
+export function ToothSvg({ type, arch, condition, isHovered, isSelected, isScheduled, isMissing, readOnly, onClick, onMouseEnter, onMouseLeave, label }: ToothSvgProps) {
   const { crown, root } = getCrownPath(type, arch);
   const condColor = CONDITION_CONFIG[condition]?.dotColor || '#10b981';
   const isCharted = condition !== 'sound';
@@ -390,84 +409,216 @@ function ToothSvg({ type, arch, condition, isHovered, isSelected, isScheduled, i
 }
 
 // ==========================================
+// SINGLE TOOTH DENTAL CARD (authentic dent style)
+// ==========================================
+export function SingleToothDentalCard({
+  toothId,
+  condition,
+  surfaces = [],
+  notes = '',
+  treatment = '',
+}: {
+  toothId: string;
+  condition: ToothCondition;
+  surfaces?: ToothSurface[];
+  notes?: string;
+  treatment?: string;
+}) {
+  const coord = findToothCoord(toothId);
+  const isPediatric = ['51','52','53','54','55','61','62','63','64','65','71','72','73','74','75','81','82','83','84','85'].includes(toothId);
+  const arch: 'upper' | 'lower' = coord.arch === 'mandibular' ? 'lower' : 'upper';
+
+  let type: ToothType = 0;
+  if (isPediatric) {
+    const list = arch === 'upper' ? UPPER_DECIDUOUS_FDI : LOWER_DECIDUOUS_FDI;
+    const idx = list.indexOf(toothId);
+    type = getPediatricToothType(idx >= 0 ? idx : 0);
+  } else {
+    const list = arch === 'upper' ? UPPER_FDI : LOWER_FDI;
+    const idx = list.indexOf(toothId);
+    type = getToothType(idx >= 0 ? idx : 0);
+  }
+
+  const condConf = CONDITION_CONFIG[condition] || CONDITION_CONFIG.sound;
+  const isMissing = condition === 'missing';
+
+  return (
+    <div className="flex flex-col sm:flex-row items-center sm:items-stretch gap-4 p-4 rounded-2xl bg-white dark:bg-[#111719] border border-gray-200 dark:border-gray-800 hover:border-teal-500/50 transition-all shadow-xs">
+      {/* Anatomical Tooth Visual Presentation (dent style) */}
+      <div className="flex flex-col items-center justify-between shrink-0 w-20 py-2.5 px-2 rounded-xl bg-gradient-to-b from-teal-50/60 to-gray-50/80 dark:from-[#162024] dark:to-[#0f1719] border border-teal-500/20 dark:border-gray-800 shadow-inner">
+        <span className="font-mono text-sm font-extrabold text-[#008294] dark:text-teal-400">
+          {coord.palmer}
+        </span>
+        <div className="w-12 h-20 my-1 flex items-center justify-center">
+          <ToothSvg
+            type={type}
+            arch={arch}
+            condition={condition}
+            isHovered={false}
+            isSelected={false}
+            isScheduled={false}
+            isMissing={isMissing}
+            readOnly={true}
+            onClick={() => {}}
+            onMouseEnter={() => {}}
+            onMouseLeave={() => {}}
+            label={`prev-${toothId}`}
+          />
+        </div>
+        <span className="text-[10px] font-mono font-bold text-gray-400 dark:text-gray-500">
+          #{toothId}
+        </span>
+      </div>
+
+      {/* Clinical Details */}
+      <div className="flex-1 min-w-0 flex flex-col justify-between space-y-2.5 py-0.5">
+        <div className="flex items-start justify-between gap-2 flex-wrap">
+          <div className="min-w-0">
+            <h4 className="text-xs sm:text-sm font-bold text-gray-900 dark:text-white leading-tight">
+              {coord.name}
+            </h4>
+            <div className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">
+              Quadrant: <span className="font-semibold text-gray-700 dark:text-gray-300">{coord.palmerQuadrant}</span> • <span className="capitalize">{coord.dentition}</span>
+            </div>
+          </div>
+          <span
+            className="px-2.5 py-1 rounded-full text-[10px] font-bold border flex items-center gap-1.5 shrink-0"
+            style={{
+              backgroundColor: `${condConf.dotColor}15`,
+              borderColor: `${condConf.dotColor}40`,
+              color: condConf.dotColor,
+            }}
+          >
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: condConf.dotColor }} />
+            {condConf.label}
+          </span>
+        </div>
+
+        {surfaces && surfaces.length > 0 && (
+          <div className="flex items-center gap-1.5 text-[11px] text-gray-600 dark:text-gray-300">
+            <span className="text-gray-400 dark:text-gray-400 font-semibold">Surfaces Involved:</span>
+            <span className="font-mono font-bold px-2 py-0.5 rounded bg-teal-500/10 text-[#008294] dark:text-teal-300 border border-teal-500/20">
+              {surfaces.join('')}
+            </span>
+          </div>
+        )}
+
+        {(treatment || notes) && (
+          <div className="text-xs text-gray-700 dark:text-gray-200 bg-gray-50/80 dark:bg-[#162024] p-3 rounded-xl border border-gray-100 dark:border-gray-800">
+            <span className="font-bold text-[#008294] dark:text-teal-400">Procedure / Findings: </span>
+            <span className="text-gray-600 dark:text-gray-300">{treatment || notes}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
 // TOOTH ROW COMPONENT
 // ==========================================
 interface ToothRowProps {
   arch: 'upper' | 'lower';
   fdiIds: string[];
-  univLabels: string[];
   palmerLabels: string[];
   teethData: Record<string, { condition: ToothCondition; surfaces: ToothSurface[]; notes?: string }>;
   scheduledToothIds: Set<string>;
   hoveredId: string | null;
   selectedId: string | null;
   readOnly: boolean;
-  notation: 'Universal' | 'Palmer' | 'FDI';
+  dentitionMode: 'permanent' | 'deciduous';
   onToothClick: (fdiId: string) => void;
   onToothHover: (fdiId: string | null) => void;
 }
 
-function ToothRow({ arch, fdiIds, univLabels, palmerLabels, teethData, scheduledToothIds, hoveredId, selectedId, readOnly, notation, onToothClick, onToothHover }: ToothRowProps) {
-  const getLabel = (fdiId: string, i: number) => {
-    if (notation === 'FDI') return fdiId;
-    if (notation === 'Palmer') return palmerLabels[i];
-    return univLabels[i];
-  };
+function ToothRow({
+  arch,
+  fdiIds,
+  palmerLabels,
+  teethData,
+  scheduledToothIds,
+  hoveredId,
+  selectedId,
+  readOnly,
+  dentitionMode,
+  onToothClick,
+  onToothHover,
+}: ToothRowProps) {
+  const halfIdx = Math.floor(fdiIds.length / 2) - 1;
 
   return (
-    <div className="flex items-end gap-0.5 sm:gap-1 w-full">
+    <div className={`flex items-end gap-0.5 sm:gap-1.5 w-full justify-center ${dentitionMode === 'deciduous' ? 'max-w-2xl mx-auto px-4' : ''}`}>
       {fdiIds.map((fdiId, i) => {
         const data = teethData[fdiId];
         const condition: ToothCondition = data?.condition || 'sound';
         const isMissing = condition === 'missing';
-        const type = getToothType(i);
-        const label = getLabel(fdiId, i);
+        const type = dentitionMode === 'deciduous' ? getPediatricToothType(i) : getToothType(i);
+        const label = palmerLabels[i];
 
         return (
-          <div key={fdiId} className="flex-1 flex flex-col items-center gap-0.5 min-w-0">
-            {/* Number label — top for upper, bottom for lower */}
-            {arch === 'upper' && (
-              <span className={`text-[9px] sm:text-[10px] font-bold font-mono leading-none mb-0.5 transition-colors ${
-                hoveredId === fdiId ? 'text-[#008294] dark:text-teal-400 font-extrabold' :
-                selectedId === fdiId ? 'text-teal-700 dark:text-teal-300 font-bold' : 'text-gray-500 dark:text-gray-400'
-              }`}>
-                {label}
-              </span>
-            )}
+          <React.Fragment key={fdiId}>
+            <div className="flex-1 flex flex-col items-center gap-0.5 min-w-0">
+              {/* Number label — top for upper */}
+              {arch === 'upper' && (
+                <span
+                  className={`text-[9px] sm:text-[11px] font-bold font-mono leading-none mb-1 transition-colors ${
+                    hoveredId === fdiId
+                      ? 'text-[#008294] dark:text-teal-400 font-extrabold'
+                      : selectedId === fdiId
+                      ? 'text-teal-700 dark:text-teal-300 font-bold'
+                      : 'text-gray-600 dark:text-gray-400'
+                  }`}
+                >
+                  {label}
+                </span>
+              )}
 
-            {/* Tooth SVG */}
-            <div
-              className={`relative w-full transition-transform duration-150 ${
-                (hoveredId === fdiId || selectedId === fdiId) && !readOnly ? 'scale-110 z-10' : ''
-              }`}
-              style={{ aspectRatio: '60/120', minWidth: '20px', maxWidth: '52px' }}
-            >
-              <ToothSvg
-                type={type}
-                arch={arch}
-                condition={condition}
-                isHovered={hoveredId === fdiId}
-                isSelected={selectedId === fdiId}
-                isScheduled={scheduledToothIds.has(fdiId)}
-                isMissing={isMissing}
-                readOnly={readOnly}
-                label={`${fdiId}-${arch}`}
-                onClick={() => onToothClick(fdiId)}
-                onMouseEnter={() => onToothHover(fdiId)}
-                onMouseLeave={() => onToothHover(null)}
-              />
+              {/* Tooth SVG */}
+              <div
+                className={`relative w-full transition-transform duration-150 ${
+                  (hoveredId === fdiId || selectedId === fdiId) && !readOnly ? 'scale-110 z-10' : ''
+                }`}
+                style={{ aspectRatio: '60/120', minWidth: '20px', maxWidth: '52px' }}
+              >
+                <ToothSvg
+                  type={type}
+                  arch={arch}
+                  condition={condition}
+                  isHovered={hoveredId === fdiId}
+                  isSelected={selectedId === fdiId}
+                  isScheduled={scheduledToothIds.has(fdiId)}
+                  isMissing={isMissing}
+                  readOnly={readOnly}
+                  label={`${fdiId}-${arch}`}
+                  onClick={() => onToothClick(fdiId)}
+                  onMouseEnter={() => onToothHover(fdiId)}
+                  onMouseLeave={() => onToothHover(null)}
+                />
+              </div>
+
+              {/* Number label — bottom for lower */}
+              {arch === 'lower' && (
+                <span
+                  className={`text-[9px] sm:text-[11px] font-bold font-mono leading-none mt-1 transition-colors ${
+                    hoveredId === fdiId
+                      ? 'text-[#008294] dark:text-teal-400 font-extrabold'
+                      : selectedId === fdiId
+                      ? 'text-teal-700 dark:text-teal-300 font-bold'
+                      : 'text-gray-600 dark:text-gray-400'
+                  }`}
+                >
+                  {label}
+                </span>
+              )}
             </div>
 
-            {/* Number label — bottom for lower */}
-            {arch === 'lower' && (
-              <span className={`text-[9px] sm:text-[10px] font-bold font-mono leading-none mt-0.5 transition-colors ${
-                hoveredId === fdiId ? 'text-[#008294] dark:text-teal-400 font-extrabold' :
-                selectedId === fdiId ? 'text-teal-700 dark:text-teal-300 font-bold' : 'text-gray-500 dark:text-gray-400'
-              }`}>
-                {label}
-              </span>
+            {/* Midline vertical separator between right and left quadrants */}
+            {i === halfIdx && (
+              <div className="flex flex-col items-center justify-center px-1 self-stretch shrink-0">
+                <div className="w-[1.5px] h-12 bg-teal-500/40 dark:bg-teal-400/40 rounded-full" />
+              </div>
             )}
-          </div>
+          </React.Fragment>
         );
       })}
     </div>
@@ -532,7 +683,9 @@ export function ToothInspectorModal({ tooth, onClose, onSave, onScheduleTooth, z
           <div>
             <label className="block text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-2">Tooth Condition</label>
             <div className="grid grid-cols-2 gap-2">
-              {(Object.keys(CONDITION_CONFIG) as ToothCondition[]).map(condKey => {
+              {(Object.keys(CONDITION_CONFIG) as ToothCondition[])
+                .filter(condKey => condKey !== 'sound')
+                .map(condKey => {
                 const conf = CONDITION_CONFIG[condKey];
                 const isSelected = currentCondition === condKey;
                 return (
@@ -619,7 +772,12 @@ export interface OdontogramChartProps {
 export function ClinicalOdontogram({ teethData, scheduledToothIds, dentitionMode, onDentitionModeChange, onToothClick, selectedToothId: externalSelectedId, readOnly = false, disabled = false }: OdontogramChartProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(externalSelectedId ?? null);
-  const [notation, setNotation] = useState<'Universal' | 'Palmer' | 'FDI'>('Universal');
+
+  const isPediatric = dentitionMode === 'deciduous';
+  const upperFdiIds = isPediatric ? UPPER_DECIDUOUS_FDI : UPPER_FDI;
+  const upperPalmerLabels = isPediatric ? UPPER_DECIDUOUS_PALMER : UPPER_PALMER;
+  const lowerFdiIds = isPediatric ? LOWER_DECIDUOUS_FDI : LOWER_FDI;
+  const lowerPalmerLabels = isPediatric ? LOWER_DECIDUOUS_PALMER : LOWER_PALMER;
 
   // Sync external selection (e.g. from scheduler)
   useEffect(() => {
@@ -668,26 +826,21 @@ export function ClinicalOdontogram({ teethData, scheduledToothIds, dentitionMode
         </div>
 
         {/* Controls */}
-        <div className="flex items-center gap-1.5 flex-wrap text-xs">
+        <div className="flex items-center gap-2 flex-wrap text-xs">
           {/* Dentition toggle */}
           {onDentitionModeChange && (
             <div className="flex items-center bg-gray-100 dark:bg-[#1a2327] p-1 rounded-xl border border-gray-200/80 dark:border-gray-800">
               {(['permanent', 'deciduous'] as const).map(m => (
                 <button key={m} type="button" onClick={() => onDentitionModeChange(m)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${dentitionMode === m ? 'bg-[#008294] text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}>
+                  className={`px-3 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${dentitionMode === m ? 'bg-[#008294] text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}>
                   {m === 'permanent' ? 'Adult (32)' : 'Pediatric (20)'}
                 </button>
               ))}
             </div>
           )}
-          {/* Notation toggle */}
-          <div className="flex items-center bg-gray-100 dark:bg-[#1a2327] p-1 rounded-xl border border-gray-200/80 dark:border-gray-800">
-            {(['Universal', 'Palmer', 'FDI'] as const).map(n => (
-              <button key={n} type="button" onClick={() => setNotation(n)}
-                className={`px-2 py-1 rounded-lg font-mono text-xs font-bold transition-all cursor-pointer ${notation === n ? 'bg-[#008294] text-white shadow-xs' : 'text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white'}`}>
-                {n === 'Universal' ? 'Univ' : n}
-              </button>
-            ))}
+          {/* Palmer notation badge indicator */}
+          <div className="px-2.5 py-1 rounded-lg font-mono text-xs font-bold bg-teal-500/10 text-[#008294] dark:text-teal-400 border border-teal-500/20">
+            Palmer
           </div>
         </div>
       </div>
@@ -704,15 +857,14 @@ export function ClinicalOdontogram({ teethData, scheduledToothIds, dentitionMode
         {/* Upper arch row */}
         <ToothRow
           arch="upper"
-          fdiIds={UPPER_FDI}
-          univLabels={UPPER_UNIV}
-          palmerLabels={UPPER_PALMER}
+          fdiIds={upperFdiIds}
+          palmerLabels={upperPalmerLabels}
           teethData={teethData}
           scheduledToothIds={scheduledToothIds}
           hoveredId={hoveredId}
           selectedId={selectedId}
           readOnly={readOnly || disabled}
-          notation={notation}
+          dentitionMode={dentitionMode}
           onToothClick={handleToothClick}
           onToothHover={setHoveredId}
         />
@@ -727,15 +879,14 @@ export function ClinicalOdontogram({ teethData, scheduledToothIds, dentitionMode
         {/* Lower arch row */}
         <ToothRow
           arch="lower"
-          fdiIds={LOWER_FDI}
-          univLabels={LOWER_UNIV}
-          palmerLabels={LOWER_PALMER}
+          fdiIds={lowerFdiIds}
+          palmerLabels={lowerPalmerLabels}
           teethData={teethData}
           scheduledToothIds={scheduledToothIds}
           hoveredId={hoveredId}
           selectedId={selectedId}
           readOnly={readOnly || disabled}
-          notation={notation}
+          dentitionMode={dentitionMode}
           onToothClick={handleToothClick}
           onToothHover={setHoveredId}
         />
@@ -753,10 +904,10 @@ export function ClinicalOdontogram({ teethData, scheduledToothIds, dentitionMode
           <div className="flex items-center justify-between w-full gap-2 flex-wrap">
             <div className="flex items-center gap-2.5">
               <div className="px-2.5 py-1 rounded-lg bg-[#008294] font-mono text-sm font-bold text-white shadow-xs">{hoveredCoord.palmer}</div>
-              <div className="px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-800 font-mono text-xs font-bold text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700">FDI #{hoveredCoord.id}</div>
+              <div className="px-2 py-1 rounded-md bg-gray-100 dark:bg-gray-800 font-mono text-xs font-bold text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-700">Palmer {hoveredCoord.palmer}</div>
               <div>
                 <div className="text-xs font-bold text-gray-900 dark:text-white leading-snug">{hoveredCoord.name}</div>
-                <div className="text-[10px] text-gray-500 dark:text-gray-400">{hoveredCoord.palmerQuadrant} · <span className="capitalize">{hoveredCoord.arch}</span></div>
+                <div className="text-[10px] text-gray-500 dark:text-gray-400">Quadrant: {hoveredCoord.palmerQuadrant} · <span className="capitalize">{hoveredCoord.dentition}</span></div>
               </div>
             </div>
             <span className="px-2.5 py-1 rounded-full text-xs font-bold border flex items-center gap-1.5"

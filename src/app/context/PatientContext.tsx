@@ -121,6 +121,75 @@ export const extractToothSchedulesFromTableData = (tableData?: string): ToothSch
   return [];
 };
 
+// Define Orthodontic Record shape & visit row (matches clinic prescription sheet)
+export interface OrthoVisitRow {
+  id: string;
+  date: string;
+  procedure: string;
+  payment: string | number;
+}
+
+export interface OrthoRecord {
+  startingDate?: string;
+  occupation?: string;
+  address?: string;
+  chiefComplaint?: string;
+  dentalHistory?: string;
+  medicalHistory?: string;
+  diagnosis?: string;
+  treatmentPlan1?: string;
+  treatmentPlan2?: string;
+  treatmentPlan3?: string;
+  treatmentPlan4?: string;
+  // Assessment parameters
+  treatedArchMax?: boolean;
+  treatedArchMan?: boolean;
+  treatedArchMaxStatus?: string;
+  treatedArchManStatus?: string;
+  applianceLabial?: boolean;
+  applianceLingual?: boolean;
+  applianceNoTreatment?: boolean;
+  bracketSystem?: string;
+  slot?: string;
+  skeletalClass?: 'Class I' | 'Class II' | 'Class III' | '';
+  dentalClass?: 'Class I' | 'Class II' | 'Class III' | '';
+  overbite?: string;
+  overjet?: string;
+  archWidthNormal?: boolean;
+  archWidthCrossbite?: boolean;
+  archWidthScissorbite?: boolean;
+  otherNotes?: string;
+  strippingMax?: boolean;
+  strippingMan?: boolean;
+  strippingOption?: 'No' | 'If necessary' | 'Yes' | '';
+  impactedTooth?: string;
+  oralHygiene?: 'Good' | 'Fair' | 'Poor' | '';
+  habitTongueThrust?: boolean;
+  habitThumbSucking?: boolean;
+  habitMouthBreather?: boolean;
+  habitOther?: string;
+  midlineMax?: string;
+  midlineMan?: string;
+  // Progress visits tracking
+  visits?: OrthoVisitRow[];
+  consentSigned?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export const extractOrthoRecord = (tableData?: string | null): OrthoRecord | null => {
+  if (!tableData) return null;
+  try {
+    const parsed = JSON.parse(tableData);
+    if (parsed && parsed.ortho) {
+      return parsed.ortho;
+    }
+  } catch (e) {
+    // legacy or non-json format
+  }
+  return null;
+};
+
 // Define the database record shape
 interface PatientRecord {
   id: string;
@@ -171,6 +240,7 @@ interface PatientContextType {
   deleteToothProcedure: (patientId: string, scheduleId: string) => Promise<void>;
   getPatientToothSchedules: (patient: Patient | null | undefined) => ToothSchedule[];
   getAllToothSchedules: () => ToothSchedule[];
+  savePatientOrthoRecord: (patientId: string, orthoRecord: OrthoRecord) => Promise<void>;
 }
 
 const PatientContext = createContext<PatientContextType | undefined>(undefined);
@@ -952,37 +1022,58 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Optional: Update the patient's record with the latest visit info so it reflects in the main table
-      const { error: updateError } = await supabase
+      // Only update valid physical columns on 'patients' table (financials & history are preserved in table_data JSON)
+      const patientUpdatePayload: Record<string, any> = {
+        diagnosis: dbVisitData.diagnosis,
+        treatment: dbVisitData.treatment,
+        current_treatment: dbVisitData.current_treatment,
+        follow_up_date: dbVisitData.follow_up_date,
+        note: dbVisitData.note,
+        table_data: dbVisitData.table_data,
+        amount_paid: dbVisitData.amount_paid,
+      };
+
+      let patientUpdateQuery = supabase
         .from('patients')
-        .update({
-          diagnosis: dbVisitData.diagnosis,
-          treatment: dbVisitData.treatment,
-          current_treatment: dbVisitData.current_treatment,
-          history: dbVisitData.history,
-          past_medical_history: dbVisitData.past_medical_history,
-          drug_history: dbVisitData.drug_history,
-          past_surgical_history: dbVisitData.past_surgical_history,
-          examination: dbVisitData.examination,
-          follow_up_date: dbVisitData.follow_up_date,
-          note: dbVisitData.note,
-          table_data: dbVisitData.table_data
-        })
+        .update(patientUpdatePayload)
         .eq('id', patientId);
 
-      if (updateError) {
-        console.error('Error updating patient with latest visit info:', updateError);
-        // Don't throw here, the visit was successfully created
-      } else {
-        // Update local state if successful
-        setPatients((prevPatients) => prevPatients.map(p => 
-          p.id === patientId ? { ...p, ...visitData } : p
-        ));
-
-        const targetPat = patients.find(p => p.id === patientId);
-        if (targetPat) {
-          return { patient: { ...targetPat, ...visitData } };
-        }
+      if (userId && userId !== '00000000-0000-0000-0000-000000000000') {
+        patientUpdateQuery = patientUpdateQuery.eq('user_id', userId);
       }
+
+      const { error: updateError } = await patientUpdateQuery;
+
+      if (updateError) {
+        console.warn('Warning updating patient with latest visit info:', updateError);
+        // Don't throw here, the visit was successfully created
+      }
+
+      // Update local state so it immediately reflects on the UI
+      setPatients((prevPatients) => prevPatients.map(p => 
+        p.id === patientId ? { 
+          ...p, 
+          ...visitData,
+          amountPaid: visitData.amountPaid !== undefined ? visitData.amountPaid : p.amountPaid,
+          totalCost: visitData.totalCost !== undefined ? visitData.totalCost : p.totalCost,
+          remainingBalance: visitData.remainingBalance !== undefined ? visitData.remainingBalance : p.remainingBalance,
+          tableData: dbVisitData.table_data
+        } : p
+      ));
+
+      const targetPat = patients.find(p => p.id === patientId);
+      return { 
+        patient: targetPat 
+          ? { 
+              ...targetPat, 
+              ...visitData, 
+              amountPaid: visitData.amountPaid !== undefined ? visitData.amountPaid : targetPat.amountPaid,
+              totalCost: visitData.totalCost !== undefined ? visitData.totalCost : targetPat.totalCost,
+              remainingBalance: visitData.remainingBalance !== undefined ? visitData.remainingBalance : targetPat.remainingBalance,
+              tableData: dbVisitData.table_data
+            } 
+          : ({ id: patientId, ...visitData } as any) 
+      };
 
     } catch (err) {
       console.error('Error adding visit:', err);
@@ -1210,6 +1301,30 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
     return list.sort((a, b) => a.targetDate.localeCompare(b.targetDate));
   };
 
+  const savePatientOrthoRecord = async (patientId: string, orthoRecord: OrthoRecord): Promise<void> => {
+    try {
+      setIsLoading(true);
+      const target = patients.find(p => p.id === patientId);
+      let currentTable: any = {};
+      try {
+        if (target?.tableData) currentTable = JSON.parse(target.tableData);
+      } catch {}
+
+      currentTable.ortho = {
+        ...orthoRecord,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const updatedJson = JSON.stringify(currentTable);
+      await editPatient(patientId, { tableData: updatedJson });
+    } catch (err) {
+      console.error('Error saving patient ortho record:', err);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   return (
     <PatientContext.Provider value={{
       patients,
@@ -1234,7 +1349,8 @@ export function PatientProvider({ children }: { children: React.ReactNode }) {
       updateToothProcedure,
       deleteToothProcedure,
       getPatientToothSchedules,
-      getAllToothSchedules
+      getAllToothSchedules,
+      savePatientOrthoRecord
     }}>
       {children}
     </PatientContext.Provider>

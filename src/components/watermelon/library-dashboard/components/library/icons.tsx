@@ -695,3 +695,37 @@ export function UserAdd02Icon(props: IconProps) {
     </svg>
   )
 }
+
+export function OrthoIcon(props: IconProps) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true" {...props}>
+      {/* Dental archwire */}
+      <path
+        d="M3 12C6.5 10 9.2 9 12 9C14.8 9 17.5 10 21 12"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      {/* Central bracket */}
+      <rect x="10.25" y="7.25" width="3.5" height="3.5" rx="0.75" stroke="currentColor" strokeWidth="1.4" />
+      {/* Left bracket */}
+      <rect x="5.5" y="8.75" width="3" height="3" rx="0.75" stroke="currentColor" strokeWidth="1.4" />
+      {/* Right bracket */}
+      <rect x="15.5" y="8.75" width="3" height="3" rx="0.75" stroke="currentColor" strokeWidth="1.4" />
+      {/* Lower dental alignment smile contour */}
+      <path
+        d="M6 16C8.2 18.2 15.8 18.2 18 16"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+      {/* Tooth anatomical crest indicators */}
+      <path
+        d="M8.5 4.5V6.5M12 3V5M15.5 4.5V6.5"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}

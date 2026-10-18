@@ -10,10 +10,12 @@ import {
   FileText,
 } from 'lucide-react';
 import ToothIcon from '@/app/components/ToothIcon';
+import { OrthoIcon } from '@/components/watermelon/library-dashboard/components/library/icons';
 
 export type PatientTab =
   | 'profile'
   | 'dental'
+  | 'ortho'
   | 'medical'
   | 'appointments'
   | 'invoices'
@@ -29,6 +31,7 @@ interface PatientNavTabsProps {
 const TABS: Array<{ id: PatientTab; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { id: 'profile', label: 'Profile', icon: User },
   { id: 'dental', label: 'Dental', icon: ToothIcon },
+  { id: 'ortho', label: 'Ortho', icon: OrthoIcon },
   { id: 'medical', label: 'Medical', icon: ShieldAlert },
   { id: 'appointments', label: 'Appointments', icon: Calendar },
   { id: 'invoices', label: 'Invoices', icon: Receipt },
